@@ -3,14 +3,14 @@ const Build = std.Build;
 const OptimizeMode = std.builtin.OptimizeMode;
 const build_utils = @import("build_utils.zig");
 
-const sqlite_dir = "../../../../../solenopsys/detonation/wrapers/sqlite/vendor/sqlite";
+const sqlite_dir = "../../../../../../solenopsys/detonation/wrapers/sqlite/vendor/sqlite";
 const sqlite_src = sqlite_dir ++ "/sqlite3.c";
 
 fn supportsTransport(target: Build.ResolvedTarget) bool {
     return target.result.os.tag == .linux;
 }
 
-const transport_vendor_src = "../wrapers/transport/vendor/capnproto/c++/src";
+const transport_vendor_src = "../transport/vendor/capnproto/c++/src";
 
 const kj_sources = [_][]const u8{
     transport_vendor_src ++ "/kj/array.c++",
@@ -101,19 +101,19 @@ fn buildMdbx(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMode) *B
         &base_flags;
 
     mdbx.addCSourceFile(.{
-        .file = b.path("../wrapers/lmdbx/vendor/libmdbx/src/alloy.c"),
+        .file = b.path("../../wrapers/lmdbx/vendor/libmdbx/src/alloy.c"),
         .flags = flags,
     });
     mdbx.addCSourceFile(.{
-        .file = b.path("../wrapers/lmdbx/version.c"),
+        .file = b.path("../../wrapers/lmdbx/version.c"),
         .flags = flags,
     });
     mdbx.addCSourceFile(.{
-        .file = b.path("../wrapers/lmdbx/cpu_stub.c"),
+        .file = b.path("../../wrapers/lmdbx/cpu_stub.c"),
         .flags = &[_][]const u8{"-fPIC"},
     });
-    mdbx.addIncludePath(b.path("../wrapers/lmdbx/vendor/libmdbx"));
-    mdbx.addIncludePath(b.path("../wrapers/lmdbx/vendor/libmdbx/src"));
+    mdbx.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx"));
+    mdbx.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx/src"));
     mdbx.linkLibC();
 
     return mdbx;
@@ -150,11 +150,11 @@ fn addSqliteVecObj(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMo
         &base_flags;
 
     vec.addCSourceFile(.{
-        .file = b.path("../wrapers/sqlite-vec/vendor/sqlite-vec/sqlite-vec.c"),
+        .file = b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec/sqlite-vec.c"),
         .flags = flags,
     });
-    vec.addIncludePath(b.path("../wrapers/sqlite-vec/vendor/sqlite-vec"));
-    vec.addIncludePath(b.path("../wrapers/sqlite-vec/vendor/sqlite-vec/vendor"));
+    vec.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
+    vec.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec/vendor"));
     vec.linkLibC();
 
     return vec;
@@ -216,21 +216,21 @@ fn addStorageExecutable(
     exe.addObject(sqlite_vec);
 
     // sqlite-vec header for VectorEngine to call sqlite3_vec_init
-    exe.root_module.addIncludePath(b.path("../wrapers/sqlite-vec/vendor/sqlite-vec"));
+    exe.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
 
     exe.addCSourceFile(.{
-        .file = b.path("../wrapers/column/src/sqlite3/c/result-transient.c"),
+        .file = b.path("../../wrapers/column/src/sqlite3/c/result-transient.c"),
         .flags = &[_][]const u8{"-std=c99"},
     });
-    exe.root_module.addIncludePath(b.path("../wrapers/column/src/sqlite3/c"));
+    exe.root_module.addIncludePath(b.path("../../wrapers/column/src/sqlite3/c"));
     exe.root_module.addIncludePath(b.path(sqlite_dir));
 
     const stanchion_mod = b.createModule(.{
-        .root_source_file = b.path("../wrapers/column/src/main.zig"),
+        .root_source_file = b.path("../../wrapers/column/src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    stanchion_mod.addIncludePath(b.path("../wrapers/column/src/sqlite3/c"));
+    stanchion_mod.addIncludePath(b.path("../../wrapers/column/src/sqlite3/c"));
     stanchion_mod.addIncludePath(b.path(sqlite_dir));
 
     const stanchion_options = b.addOptions();
@@ -240,19 +240,19 @@ fn addStorageExecutable(
     exe.root_module.addImport("stanchion", stanchion_mod);
 
     exe.root_module.addImport("lmdbx", b.createModule(.{
-        .root_source_file = b.path("../wrapers/lmdbx/src/lmdbx.zig"),
+        .root_source_file = b.path("../../wrapers/lmdbx/src/lmdbx.zig"),
         .target = target,
         .optimize = optimize,
     }));
 
     exe.root_module.addImport("lmdbx_pure", b.createModule(.{
-        .root_source_file = b.path("../wrapers/lmdbx/src/lmdbx_pure.zig"),
+        .root_source_file = b.path("../../wrapers/lmdbx/src/lmdbx_pure.zig"),
         .target = target,
         .optimize = optimize,
     }));
 
     exe.root_module.addImport("sqlite3", b.createModule(.{
-        .root_source_file = b.path("../wrapers/column/src/sqlite3.zig"),
+        .root_source_file = b.path("../../wrapers/column/src/sqlite3.zig"),
         .target = target,
         .optimize = optimize,
     }));
@@ -274,15 +274,15 @@ fn addStorageExecutable(
         }
 
         exe.addCSourceFile(.{
-            .file = b.path("../wrapers/transport/src/generated/wire.capnp.cpp"),
+            .file = b.path("../transport/src/generated/wire.capnp.cpp"),
             .flags = cpp_flags,
         });
         exe.addCSourceFile(.{
-            .file = b.path("../wrapers/transport/src/capnp_wrap.cpp"),
+            .file = b.path("../transport/src/capnp_wrap.cpp"),
             .flags = cpp_flags,
         });
-        exe.addIncludePath(b.path("../wrapers/transport/include"));
-        exe.addIncludePath(b.path("../wrapers/transport/src/generated"));
+        exe.addIncludePath(b.path("../transport/include"));
+        exe.addIncludePath(b.path("../transport/src/generated"));
         exe.addIncludePath(b.path(transport_vendor_src));
         exe.linkLibCpp();
     }
@@ -335,26 +335,26 @@ pub fn build(b: *Build) void {
     tests.addObject(sqlite_vec);
 
     // sqlite-vec header for VectorEngine
-    tests.root_module.addIncludePath(b.path("../wrapers/sqlite-vec/vendor/sqlite-vec"));
+    tests.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
 
     tests.addCSourceFile(.{
-        .file = b.path("../wrapers/column/src/sqlite3/c/result-transient.c"),
+        .file = b.path("../../wrapers/column/src/sqlite3/c/result-transient.c"),
         .flags = &[_][]const u8{"-std=c99"},
     });
-    tests.root_module.addIncludePath(b.path("../wrapers/column/src/sqlite3/c"));
+    tests.root_module.addIncludePath(b.path("../../wrapers/column/src/sqlite3/c"));
     tests.root_module.addIncludePath(b.path(sqlite_dir));
     tests.root_module.addImport("lmdbx", b.createModule(.{
-        .root_source_file = b.path("../wrapers/lmdbx/src/lmdbx.zig"),
+        .root_source_file = b.path("../../wrapers/lmdbx/src/lmdbx.zig"),
         .target = target,
         .optimize = optimize,
     }));
     tests.root_module.addImport("lmdbx_pure", b.createModule(.{
-        .root_source_file = b.path("../wrapers/lmdbx/src/lmdbx_pure.zig"),
+        .root_source_file = b.path("../../wrapers/lmdbx/src/lmdbx_pure.zig"),
         .target = target,
         .optimize = optimize,
     }));
     tests.root_module.addImport("sqlite3", b.createModule(.{
-        .root_source_file = b.path("../wrapers/column/src/sqlite3.zig"),
+        .root_source_file = b.path("../../wrapers/column/src/sqlite3.zig"),
         .target = target,
         .optimize = optimize,
     }));
