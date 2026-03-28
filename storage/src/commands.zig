@@ -224,7 +224,9 @@ pub const StorageCommands = struct {
                 handle = .{ .kv = KvEngine.init(self.allocator, path_z) };
             },
             .files => {
-                handle = .{ .files = FilesEngine.init(self.allocator, data_dir) };
+                const path_z = try self.allocator.dupeZ(u8, data_dir);
+                data_path_z = path_z;
+                handle = .{ .files = FilesEngine.init(self.allocator, path_z) };
             },
             .graph => {
                 const path_tmp = try std.fmt.allocPrint(self.allocator, "{s}/graph.db", .{data_dir});
