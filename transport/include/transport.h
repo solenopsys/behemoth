@@ -52,6 +52,10 @@ TransportRequest* transport_req_file_get(const char* ms, const char* store, cons
 TransportRequest* transport_req_file_delete(const char* ms, const char* store, const char* key);
 TransportRequest* transport_req_file_list(const char* ms, const char* store);
 TransportRequest* transport_req_kv_compact(const char* ms, const char* store);
+TransportRequest* transport_req_dump_create(const char* ms, const char* store);
+TransportRequest* transport_req_dump_list(void);
+TransportRequest* transport_req_dump_delete(const char* file_name);
+TransportRequest* transport_req_dump_read(const char* file_name, uint64_t offset, uint32_t length);
 
 /* Serialize request to a flat capnp buffer. Caller must free with transport_free_buf(). */
 int32_t transport_req_encode(TransportRequest* req, uint8_t** out_buf, size_t* out_len);
@@ -162,6 +166,10 @@ typedef enum {
     REQ_FILE_LIST   = 17,
     REQ_VEC_SEARCH  = 18,
     REQ_KV_COMPACT  = 19,
+    REQ_DUMP_CREATE = 20,
+    REQ_DUMP_LIST   = 21,
+    REQ_DUMP_DELETE = 22,
+    REQ_DUMP_READ   = 23,
 } RequestCmd;
 
 TransportRequestReader* transport_req_reader_decode(const uint8_t* buf, size_t len);
@@ -177,6 +185,9 @@ const char* transport_req_reader_key(TransportRequestReader* r);
 const uint8_t* transport_req_reader_value_ptr(TransportRequestReader* r);
 size_t      transport_req_reader_value_len(TransportRequestReader* r);
 const char* transport_req_reader_prefix(TransportRequestReader* r);
+const char* transport_req_reader_file_name(TransportRequestReader* r);
+uint64_t    transport_req_reader_dump_offset(TransportRequestReader* r);
+uint32_t    transport_req_reader_dump_length(TransportRequestReader* r);
 
 /* ── Server-side: encode outgoing response ─────────────────────────────────── */
 

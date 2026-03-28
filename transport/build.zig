@@ -132,6 +132,14 @@ pub fn build(b: *std.Build) void {
             const lib_name = getLibName(std.heap.page_allocator, "transport", target_str);
             const lib = addTransportLib(b, resolved_target, optimize, lib_name);
             b.installArtifact(lib);
+            const so_name = std.fmt.allocPrint(std.heap.page_allocator, "lib{s}.so", .{lib_name}) catch continue;
+            const sync = b.addInstallFileWithDir(
+                lib.getEmittedBin(),
+                .{ .custom = "../../bun-transport/bin-libs" },
+                so_name,
+            );
+            sync.step.dependOn(&lib.step);
+            b.getInstallStep().dependOn(&sync.step);
         }
         return;
     }

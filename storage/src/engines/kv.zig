@@ -18,6 +18,22 @@ pub const KvEngine = struct {
 
     pub fn open(self: *KvEngine) !void {
         self.db = try lmdbx.Database.open(self.path);
+        self.autoCompact();
+    }
+
+    fn autoCompact(self: *KvEngine) void {
+        var db = self.db orelse return;
+        const ratio = db.utilization() orelse return;
+        if (ratio >= 0.5) return;
+        std.log.info("kv auto-compact {s}: utilization {d:.0}%, compacting...", .{
+            self.path, ratio * 100,
+        });
+        db.compact(self.allocator, self.path) catch |e| {
+            std.log.err("kv auto-compact {s} failed: {}", .{ self.path, e });
+            return;
+        };
+        self.db = db;
+        std.log.info("kv auto-compact {s}: done", .{self.path});
     }
 
     pub fn close(self: *KvEngine) void {

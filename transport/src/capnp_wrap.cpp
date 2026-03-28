@@ -253,6 +253,42 @@ extern "C" TransportRequest* transport_req_kv_compact(const char* ms, const char
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_kv_compact")
 }
 
+extern "C" TransportRequest* transport_req_dump_create(const char* ms, const char* store) {
+    try {
+        auto* r = make_req(ms, store);
+        if (!r) return nullptr;
+        r->req.getBody().setDumpCreate();
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_dump_create")
+}
+
+extern "C" TransportRequest* transport_req_dump_list(void) {
+    try {
+        auto* r = new TransportRequest();
+        r->req.getBody().setDumpList();
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_dump_list")
+}
+
+extern "C" TransportRequest* transport_req_dump_delete(const char* file_name) {
+    try {
+        auto* r = new TransportRequest();
+        r->req.getBody().initDumpDelete().setFileName(file_name ? file_name : "");
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_dump_delete")
+}
+
+extern "C" TransportRequest* transport_req_dump_read(const char* file_name, uint64_t offset, uint32_t length) {
+    try {
+        auto* r = new TransportRequest();
+        auto body = r->req.getBody().initDumpRead();
+        body.setFileName(file_name ? file_name : "");
+        body.setOffset(offset);
+        body.setLength(length);
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_dump_read")
+}
+
 // ── Encode / free request ─────────────────────────────────────────────────────
 
 extern "C" int32_t transport_req_encode(TransportRequest* req, uint8_t** out_buf, size_t* out_len) {
@@ -672,6 +708,32 @@ extern "C" const char* transport_req_reader_prefix(TransportRequestReader* r) {
         if (r->req.getBody().which() != Request::Body::KV_LIST) return "";
         return r->req.getBody().getKvList().getPrefix().cStr();
     } catch (...) { return ""; }
+}
+
+extern "C" const char* transport_req_reader_file_name(TransportRequestReader* r) {
+    if (!r) return "";
+    try {
+        auto which = r->req.getBody().which();
+        if (which == Request::Body::DUMP_DELETE) return r->req.getBody().getDumpDelete().getFileName().cStr();
+        if (which == Request::Body::DUMP_READ)   return r->req.getBody().getDumpRead().getFileName().cStr();
+        return "";
+    } catch (...) { return ""; }
+}
+
+extern "C" uint64_t transport_req_reader_dump_offset(TransportRequestReader* r) {
+    if (!r) return 0;
+    try {
+        if (r->req.getBody().which() != Request::Body::DUMP_READ) return 0;
+        return r->req.getBody().getDumpRead().getOffset();
+    } catch (...) { return 0; }
+}
+
+extern "C" uint32_t transport_req_reader_dump_length(TransportRequestReader* r) {
+    if (!r) return 0;
+    try {
+        if (r->req.getBody().which() != Request::Body::DUMP_READ) return 0;
+        return r->req.getBody().getDumpRead().getLength();
+    } catch (...) { return 0; }
 }
 
 // ── Server-side: encode outgoing response ────────────────────────────────────

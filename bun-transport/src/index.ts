@@ -35,6 +35,10 @@ const SYMBOLS = {
   transport_req_file_delete:{ args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_file_list:  { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
   transport_req_kv_compact: { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
+  transport_req_dump_create: { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
+  transport_req_dump_list:   { args: [],                                                         returns: FFIType.ptr },
+  transport_req_dump_delete: { args: [FFIType.cstring],                                          returns: FFIType.ptr },
+  transport_req_dump_read:   { args: [FFIType.cstring, FFIType.u64, FFIType.u32],               returns: FFIType.ptr },
   transport_req_free:       { args: [FFIType.ptr],                                             returns: FFIType.void },
 
   // Response accessors
@@ -62,6 +66,9 @@ const SYMBOLS = {
   transport_resp_manifest_version:          { args: [FFIType.ptr], returns: FFIType.u32 },
   transport_resp_manifest_migration_count:  { args: [FFIType.ptr], returns: FFIType.u32 },
   transport_resp_manifest_migration_at:     { args: [FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
+  transport_req_reader_file_name:    { args: [FFIType.ptr], returns: FFIType.ptr },
+  transport_req_reader_dump_offset:  { args: [FFIType.ptr], returns: FFIType.u64 },
+  transport_req_reader_dump_length:  { args: [FFIType.ptr], returns: FFIType.u32 },
   // KV pairs
   transport_resp_pair_count:     { args: [FFIType.ptr], returns: FFIType.u32 },
   transport_resp_pair_key_at:    { args: [FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
@@ -471,6 +478,32 @@ export class StorageConnection {
     return this.sendRecv(() => s.transport_req_kv_compact(cstr(ms), cstr(store)) as number).telemetry();
   }
 
+  // ── Dumps ────────────────────────────────────────────────────────────────
+
+  dumpCreate(ms: string, store: string): string {
+    const buf = this.sendRecv(() => s.transport_req_dump_create(cstr(ms), cstr(store)) as number).rawData();
+    return buf.toString('utf8');
+  }
+
+  dumpList(): Array<{ name: string; size: bigint }> {
+    return this.sendRecv(() => s.transport_req_dump_list() as number)
+      .pairs()
+      .map(p => ({
+        name: p.key,
+        size: p.value.length >= 8 ? p.value.readBigUInt64LE(0) : 0n,
+      }));
+  }
+
+  dumpDelete(fileName: string): void {
+    this.sendRecv(() => s.transport_req_dump_delete(cstr(fileName)) as number).telemetry();
+  }
+
+  dumpRead(fileName: string, offset: bigint, length: number): Buffer {
+    return this.sendRecv(
+      () => s.transport_req_dump_read(cstr(fileName), offset, length) as number,
+    ).rawData();
+  }
+
   // ── Files ────────────────────────────────────────────────────────────────
 
   filePut(ms: string, store: string, key: string, data: Buffer): Telemetry {
@@ -646,6 +679,15 @@ class Response {
     }
     this.free();
     return src;
+  }
+
+  rawData(): Buffer {
+    const dataLen = Number(s.transport_resp_data_len(this.handle) as bigint);
+    const dataPtr = Number(s.transport_resp_data_ptr(this.handle) as bigint);
+    const buf = Buffer.allocUnsafe(dataLen);
+    for (let i = 0; i < dataLen; i++) buf[i] = read.u8(dataPtr, i);
+    this.free();
+    return buf;
   }
 
   manifest(): ManifestInfo {

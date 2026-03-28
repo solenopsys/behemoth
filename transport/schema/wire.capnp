@@ -45,6 +45,10 @@ struct Request {
     fileList    @19 :Void;
     vecSearch   @20 :VecSearchBody;
     kvCompact   @21 :Void;
+    dumpCreate  @22 :Void;
+    dumpList    @23 :Void;
+    dumpDelete  @24 :DumpDeleteBody;
+    dumpRead    @25 :DumpReadBody;
   }
 
   struct OpenBody      { storeType @0 :StoreType; }
@@ -62,6 +66,8 @@ struct Request {
     queryVector  @2 :List(Float32);
     limit        @3 :UInt32;
   }
+  struct DumpDeleteBody { fileName @0 :Text; }
+  struct DumpReadBody   { fileName @0 :Text; offset @1 :UInt64; length @2 :UInt32; }
 }
 
 struct Response {

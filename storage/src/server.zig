@@ -230,6 +230,9 @@ const StoreOp = struct {
     prefix: []const u8 = "",
     migration_id: []const u8 = "",
     output_path: []const u8 = "",
+    file_name: []const u8 = "",
+    dump_offset: u64 = 0,
+    dump_length: u32 = 0,
     // Result
     result: CBytes = .{ .ptr = null, .len = 0 },
     op_err: ?anyerror = null,
@@ -400,6 +403,12 @@ const StoreOp = struct {
                 tel.op_count += 1;
                 self.result = encodeOk(tel);
             },
+            c.REQ_DUMP_CREATE => {
+                const file_name = try self.commands.createDump(self.ms, self.store);
+                defer self.commands.allocator.free(file_name);
+                tel.op_count += 1;
+                self.result = encodeData(tel, file_name);
+            },
             else => return error.UnknownCommand,
         }
     }
@@ -473,6 +482,64 @@ fn dispatch(
                 return encodeKeys(tel, key_ptrs[0..i]);
             }
             // Store-specific FILE_LIST falls through to worker dispatch
+        },
+        c.REQ_DUMP_CREATE => {
+            stores_rwlock.lockShared();
+            defer stores_rwlock.unlockShared();
+            const file_name = try commands.createDump(ms, store);
+            defer allocator.free(file_name);
+            tel.op_count += 1;
+            return encodeData(tel, file_name);
+        },
+        c.REQ_DUMP_LIST => {
+            const entries = try commands.listDumps();
+            defer {
+                for (entries) |e| allocator.free(e.name);
+                allocator.free(entries);
+            }
+            tel.op_count += 1;
+            const n = entries.len;
+            const key_ptrs = try allocator.alloc([*c]const u8, n);
+            defer allocator.free(key_ptrs);
+            const key_lens = try allocator.alloc(usize, n);
+            defer allocator.free(key_lens);
+            const val_ptrs = try allocator.alloc([*c]const u8, n);
+            defer allocator.free(val_ptrs);
+            const val_lens = try allocator.alloc(usize, n);
+            defer allocator.free(val_lens);
+            var size_bufs = try allocator.alloc([8]u8, n);
+            defer allocator.free(size_bufs);
+            for (entries, 0..) |e, i| {
+                key_ptrs[i] = e.name.ptr;
+                key_lens[i] = e.name.len;
+                std.mem.writeInt(u64, &size_bufs[i], e.size, .little);
+                val_ptrs[i] = &size_bufs[i];
+                val_lens[i] = 8;
+            }
+            var out_p: ?[*]u8 = null;
+            var out_l: usize = 0;
+            _ = c.transport_encode_kv_pairs(
+                &out_p, &out_l, telC(tel),
+                @ptrCast(key_ptrs.ptr), @ptrCast(key_lens.ptr),
+                @ptrCast(val_ptrs.ptr), @ptrCast(val_lens.ptr),
+                @intCast(n),
+            );
+            return .{ .ptr = out_p, .len = out_l };
+        },
+        c.REQ_DUMP_DELETE => {
+            const file_name = std.mem.span(c.transport_req_reader_file_name(reader));
+            try commands.deleteDump(file_name);
+            tel.op_count += 1;
+            return encodeOk(tel);
+        },
+        c.REQ_DUMP_READ => {
+            const file_name = std.mem.span(c.transport_req_reader_file_name(reader));
+            const offset = c.transport_req_reader_dump_offset(reader);
+            const length = c.transport_req_reader_dump_length(reader);
+            const chunk = try commands.readDump(file_name, offset, length);
+            defer allocator.free(chunk);
+            tel.op_count += 1;
+            return encodeData(tel, chunk);
         },
         else => {},
     }

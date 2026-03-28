@@ -40,6 +40,8 @@ CAPNP_DECLARE_SCHEMA(8507108579d59fc5);
 CAPNP_DECLARE_SCHEMA(e37787ecc38b216b);
 CAPNP_DECLARE_SCHEMA(8437388f75fb5f43);
 CAPNP_DECLARE_SCHEMA(f405922cdbf806e4);
+CAPNP_DECLARE_SCHEMA(d30eb85190ad02d0);
+CAPNP_DECLARE_SCHEMA(dbf92c17d1c076c0);
 CAPNP_DECLARE_SCHEMA(82e27950a9944a5d);
 CAPNP_DECLARE_SCHEMA(a63aeeac83ae5e48);
 CAPNP_DECLARE_SCHEMA(c5fa60ac174b1ea6);
@@ -87,6 +89,8 @@ struct Request {
   struct FilePutBody;
   struct FileKeyBody;
   struct VecSearchBody;
+  struct DumpDeleteBody;
+  struct DumpReadBody;
   struct Body;
 
   struct _capnpPrivate {
@@ -247,6 +251,36 @@ struct Request::VecSearchBody {
   };
 };
 
+struct Request::DumpDeleteBody {
+  DumpDeleteBody() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(d30eb85190ad02d0, 0, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct Request::DumpReadBody {
+  DumpReadBody() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(dbf92c17d1c076c0, 2, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
 struct Request::Body {
   Body() = delete;
 
@@ -274,6 +308,10 @@ struct Request::Body {
     FILE_LIST,
     VEC_SEARCH,
     KV_COMPACT,
+    DUMP_CREATE,
+    DUMP_LIST,
+    DUMP_DELETE,
+    DUMP_READ,
   };
 
   struct _capnpPrivate {
@@ -1472,6 +1510,178 @@ private:
 };
 #endif  // !CAPNP_LITE
 
+class Request::DumpDeleteBody::Reader {
+public:
+  typedef DumpDeleteBody Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasFileName() const;
+  inline  ::capnp::Text::Reader getFileName() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class Request::DumpDeleteBody::Builder {
+public:
+  typedef DumpDeleteBody Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasFileName();
+  inline  ::capnp::Text::Builder getFileName();
+  inline void setFileName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFileName(unsigned int size);
+  inline void adoptFileName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFileName();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class Request::DumpDeleteBody::Pipeline {
+public:
+  typedef DumpDeleteBody Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class Request::DumpReadBody::Reader {
+public:
+  typedef DumpReadBody Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasFileName() const;
+  inline  ::capnp::Text::Reader getFileName() const;
+
+  inline  ::uint64_t getOffset() const;
+
+  inline  ::uint32_t getLength() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class Request::DumpReadBody::Builder {
+public:
+  typedef DumpReadBody Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasFileName();
+  inline  ::capnp::Text::Builder getFileName();
+  inline void setFileName( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFileName(unsigned int size);
+  inline void adoptFileName(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFileName();
+
+  inline  ::uint64_t getOffset();
+  inline void setOffset( ::uint64_t value);
+
+  inline  ::uint32_t getLength();
+  inline void setLength( ::uint32_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class Request::DumpReadBody::Pipeline {
+public:
+  typedef DumpReadBody Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
 class Request::Body::Reader {
 public:
   typedef Body Reads;
@@ -1562,6 +1772,20 @@ public:
 
   inline bool isKvCompact() const;
   inline  ::capnp::Void getKvCompact() const;
+
+  inline bool isDumpCreate() const;
+  inline  ::capnp::Void getDumpCreate() const;
+
+  inline bool isDumpList() const;
+  inline  ::capnp::Void getDumpList() const;
+
+  inline bool isDumpDelete() const;
+  inline bool hasDumpDelete() const;
+  inline  ::Request::DumpDeleteBody::Reader getDumpDelete() const;
+
+  inline bool isDumpRead() const;
+  inline bool hasDumpRead() const;
+  inline  ::Request::DumpReadBody::Reader getDumpRead() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -1723,6 +1947,30 @@ public:
   inline bool isKvCompact();
   inline  ::capnp::Void getKvCompact();
   inline void setKvCompact( ::capnp::Void value = ::capnp::VOID);
+
+  inline bool isDumpCreate();
+  inline  ::capnp::Void getDumpCreate();
+  inline void setDumpCreate( ::capnp::Void value = ::capnp::VOID);
+
+  inline bool isDumpList();
+  inline  ::capnp::Void getDumpList();
+  inline void setDumpList( ::capnp::Void value = ::capnp::VOID);
+
+  inline bool isDumpDelete();
+  inline bool hasDumpDelete();
+  inline  ::Request::DumpDeleteBody::Builder getDumpDelete();
+  inline void setDumpDelete( ::Request::DumpDeleteBody::Reader value);
+  inline  ::Request::DumpDeleteBody::Builder initDumpDelete();
+  inline void adoptDumpDelete(::capnp::Orphan< ::Request::DumpDeleteBody>&& value);
+  inline ::capnp::Orphan< ::Request::DumpDeleteBody> disownDumpDelete();
+
+  inline bool isDumpRead();
+  inline bool hasDumpRead();
+  inline  ::Request::DumpReadBody::Builder getDumpRead();
+  inline void setDumpRead( ::Request::DumpReadBody::Reader value);
+  inline  ::Request::DumpReadBody::Builder initDumpRead();
+  inline void adoptDumpRead(::capnp::Orphan< ::Request::DumpReadBody>&& value);
+  inline ::capnp::Orphan< ::Request::DumpReadBody> disownDumpRead();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -3231,6 +3479,102 @@ inline void Request::VecSearchBody::Builder::setLimit( ::uint32_t value) {
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
+inline bool Request::DumpDeleteBody::Reader::hasFileName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::DumpDeleteBody::Builder::hasFileName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader Request::DumpDeleteBody::Reader::getFileName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder Request::DumpDeleteBody::Builder::getFileName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void Request::DumpDeleteBody::Builder::setFileName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder Request::DumpDeleteBody::Builder::initFileName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void Request::DumpDeleteBody::Builder::adoptFileName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> Request::DumpDeleteBody::Builder::disownFileName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool Request::DumpReadBody::Reader::hasFileName() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::DumpReadBody::Builder::hasFileName() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader Request::DumpReadBody::Reader::getFileName() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder Request::DumpReadBody::Builder::getFileName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void Request::DumpReadBody::Builder::setFileName( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder Request::DumpReadBody::Builder::initFileName(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void Request::DumpReadBody::Builder::adoptFileName(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> Request::DumpReadBody::Builder::disownFileName() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t Request::DumpReadBody::Reader::getOffset() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t Request::DumpReadBody::Builder::getOffset() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Request::DumpReadBody::Builder::setOffset( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint32_t Request::DumpReadBody::Reader::getLength() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t Request::DumpReadBody::Builder::getLength() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void Request::DumpReadBody::Builder::setLength( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
 inline  ::Request::Body::Which Request::Body::Reader::which() const {
   return _reader.getDataField<Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
@@ -4122,6 +4466,166 @@ inline void Request::Body::Builder::setKvCompact( ::capnp::Void value) {
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_COMPACT);
   _builder.setDataField< ::capnp::Void>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Request::Body::Reader::isDumpCreate() const {
+  return which() == Request::Body::DUMP_CREATE;
+}
+inline bool Request::Body::Builder::isDumpCreate() {
+  return which() == Request::Body::DUMP_CREATE;
+}
+inline  ::capnp::Void Request::Body::Reader::getDumpCreate() const {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_CREATE),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::capnp::Void Request::Body::Builder::getDumpCreate() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_CREATE),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Request::Body::Builder::setDumpCreate( ::capnp::Void value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_CREATE);
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Request::Body::Reader::isDumpList() const {
+  return which() == Request::Body::DUMP_LIST;
+}
+inline bool Request::Body::Builder::isDumpList() {
+  return which() == Request::Body::DUMP_LIST;
+}
+inline  ::capnp::Void Request::Body::Reader::getDumpList() const {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_LIST),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::capnp::Void Request::Body::Builder::getDumpList() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_LIST),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Request::Body::Builder::setDumpList( ::capnp::Void value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_LIST);
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Request::Body::Reader::isDumpDelete() const {
+  return which() == Request::Body::DUMP_DELETE;
+}
+inline bool Request::Body::Builder::isDumpDelete() {
+  return which() == Request::Body::DUMP_DELETE;
+}
+inline bool Request::Body::Reader::hasDumpDelete() const {
+  if (which() != Request::Body::DUMP_DELETE) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::Body::Builder::hasDumpDelete() {
+  if (which() != Request::Body::DUMP_DELETE) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Request::DumpDeleteBody::Reader Request::Body::Reader::getDumpDelete() const {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_DELETE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::Request::DumpDeleteBody::Builder Request::Body::Builder::getDumpDelete() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_DELETE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::setDumpDelete( ::Request::DumpDeleteBody::Reader value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_DELETE);
+  ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::Request::DumpDeleteBody::Builder Request::Body::Builder::initDumpDelete() {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_DELETE);
+  return ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::adoptDumpDelete(
+    ::capnp::Orphan< ::Request::DumpDeleteBody>&& value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_DELETE);
+  ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Request::DumpDeleteBody> Request::Body::Builder::disownDumpDelete() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_DELETE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpDeleteBody>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool Request::Body::Reader::isDumpRead() const {
+  return which() == Request::Body::DUMP_READ;
+}
+inline bool Request::Body::Builder::isDumpRead() {
+  return which() == Request::Body::DUMP_READ;
+}
+inline bool Request::Body::Reader::hasDumpRead() const {
+  if (which() != Request::Body::DUMP_READ) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::Body::Builder::hasDumpRead() {
+  if (which() != Request::Body::DUMP_READ) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Request::DumpReadBody::Reader Request::Body::Reader::getDumpRead() const {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_READ),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::Request::DumpReadBody::Builder Request::Body::Builder::getDumpRead() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_READ),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::setDumpRead( ::Request::DumpReadBody::Reader value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_READ);
+  ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::Request::DumpReadBody::Builder Request::Body::Builder::initDumpRead() {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_READ);
+  return ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::adoptDumpRead(
+    ::capnp::Orphan< ::Request::DumpReadBody>&& value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::DUMP_READ);
+  ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Request::DumpReadBody> Request::Body::Builder::disownDumpRead() {
+  KJ_IREQUIRE((which() == Request::Body::DUMP_READ),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::DumpReadBody>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
 inline bool Response::Reader::hasTelemetry() const {
