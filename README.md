@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="behemoth.png" width="560"/>
+  <img src="behemoth.png" width="840"/>
 </p>
 
 # Behemoth
 
-Bun app does orchestration.  
-Behemoth executes storage work outside the Bun event loop.  
+Application layer does orchestration.  
+Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
 
 Behemoth is a native multi-engine data platform focused on one practical goal: provide the right storage model for each workload behind a single runtime and transport surface.
@@ -14,7 +14,7 @@ It combines relational, key-value, columnar, vector, file, and graph capabilitie
 
 ## Problem Statement
 
-Behemoth is designed to solve a concrete bottleneck: I/O pressure in Bun-centric runtime paths can block the event loop and reduce effective throughput under mixed workloads.
+Behemoth is designed to solve a concrete bottleneck: I/O pressure in application runtime paths can block event loops and reduce effective throughput under mixed workloads.
 
 The project moves critical data-path operations into native components and a dedicated transport/runtime layer to avoid event-loop stalls, reduce latency spikes, and maximize useful work per CPU time slice.
 
@@ -22,8 +22,16 @@ It also addresses architectural coupling problems typical for shared monolithic 
 
 ## Contrast: Traditional vs Behemoth
 
-- Traditional way: Bun + shared Postgres/Redis/Vector DB + cross-service coupling.
-- Behemoth way: Bun + native transport + per-service/per-tenant micro-stores.
+- Traditional way: app runtime + shared Postgres/Redis/Vector DB + cross-service coupling.
+- Behemoth way: app runtime + native transport + per-service/per-tenant micro-stores.
+
+## Public Benchmark Snapshot
+
+Open benchmark and vendor-published test highlights behind the selected engines:
+
+- `sqlite3`: SQLite reports small-blob read/write workloads about `35% faster` than direct file I/O in its `kvtest` scenario, with about `20%` lower disk usage for the same blob dataset.
+- `lmdbx`: libmdbx reports `10–20%` higher CRUD benchmark performance than LMDB in tmpfs scenarios, and up to `30%` with specific build options.
+- `sqlite-vec`: public sqlite-vec benchmark results (author-run, Mac M1) show query times around `33ms` on SIFT1M (`vec0` mode) vs `46ms` DuckDB and `136ms` NumPy in the same brute-force comparison setup.
 
 ## Target Environments
 
@@ -45,7 +53,7 @@ Behemoth is designed for low-ops operation:
 - One runtime for multiple data models instead of operating many separate databases per feature.
 - Engine-per-workload approach: each store type uses a backend that is strong in that class.
 - Native-first implementation (Zig/C/C++) with low operational overhead.
-- Unified transport layer and JS/Bun bindings for integration from application services.
+- Unified transport layer with Bun integration via `bun-transport`.
 - Microservice-first storage isolation: each service owns its own store boundary.
 - Tenant-first storage isolation: each business tenant can receive dedicated micro-stores.
 
@@ -113,39 +121,37 @@ It does not own product business workflows, UI logic, or domain orchestration po
 
 ### `sqlite3` (SQL Foundation)
 
-- One of the most battle-tested embedded databases in production ecosystems.
-- Strong reliability profile, predictable behavior, and mature SQL tooling.
-- Excellent compactness and deployment simplicity for embedded/service-local usage.
+`sqlite3` is one of the most battle-tested embedded SQL engines and remains a strong compact default for service-local relational workloads. In SQLite's open `kvtest` measurements for small blobs, database access is reported around `35%` faster than direct files in the tested setup, while using about `20%` less disk for the same data shape.
 
 ### `lmdbx` (KV Foundation)
 
-- High-performance B+tree KV engine with very low overhead and strong read performance.
-- Widely trusted in systems that need predictable latency and robustness.
-- Efficient footprint and operational simplicity compared with heavyweight network KV servers.
+`lmdbx` gives a high-performance embedded KV path with mmap-based design and low operational overhead. In libmdbx public CRUD benchmark notes, it is reported as typically `10–20%` faster than LMDB, and up to `30%` faster under specific build settings in in-memory/tmpfs-like scenarios.
 
 ### `sqlite-vec` (Vector Extension)
 
-- Adds vector search to a compact SQLite-based stack.
-- Useful when you want vector capability without deploying a dedicated heavy vector database.
-- Good balance of practical performance and minimal operational complexity.
+`sqlite-vec` provides vector search in a compact SQLite-centric stack, which fits local and micro-store deployments better than heavyweight external vector services. In public sqlite-vec benchmark posts (author-run brute-force tests), reported query times include roughly `33ms` for `vec0` on SIFT1M test conditions, with faster modes shown for static/in-memory variants.
 
 ### `ryugraph` (Graph Foundation)
 
-- Purpose-built graph engine for graph-native workloads.
-- Better fit for traversal-heavy/query-connected data than forcing graph logic into pure relational layouts.
-- Keeps graph concerns isolated while still integrated into the same Behemoth runtime.
+`ryugraph` is used as the graph-specialized backend so graph traversal and graph-shaped query patterns stay isolated from SQL/KV concerns. Public, standardized, independently reproduced benchmark figures for this exact engine are currently less established than for SQLite/LMDB-family engines, so Behemoth treats it as a specialized graph path chosen for workload fit, not generic graph leaderboard claims.
 
 ### Filesystem Engine (`std.fs`)
 
-- Direct and efficient for binary asset/blob persistence.
-- Minimal abstraction overhead and strong portability.
-- Compact by design: no extra database layer when object semantics are file-native.
+The filesystem-backed engine keeps binary/blob persistence simple and portable with near-zero abstraction overhead. It is intentionally minimal: for file-native object semantics, skipping an extra database layer reduces both footprint and operational complexity.
 
 ### Column Layer (on top of SQLite)
 
-- Reuses a mature SQL core while providing column-oriented access behavior for analytics-style workloads.
-- Avoids introducing another heavy external dependency for this access model.
-- Keeps deployment compact while covering a broader query profile.
+The column layer reuses SQLite foundations to provide analytics-style access behavior without introducing another heavy external service. This keeps the deployment surface compact while extending query patterns beyond plain row-oriented access.
+
+## Benchmark Notes
+
+Benchmark numbers above come from publicly available engine documentation and benchmark posts. They are workload-specific, hardware-dependent, and not universal; always validate on your own dataset and deployment profile.
+
+## Benchmark Sources
+
+- SQLite: `Internal Versus External BLOBs` (`kvtest`) — https://www.sqlite.org/intern-v-extern-blob.html
+- libmdbx: README benchmark note vs LMDB (`+10–20%`, up to `+30%`) — https://github.com/isar/libmdbx
+- sqlite-vec: public benchmark post by project author — https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/
 
 ## Transport Architecture
 
@@ -153,7 +159,7 @@ Behemoth transport is optimized for very fast local/native communication:
 
 - Unix domain sockets for low-overhead local IPC.
 - Cap'n Proto as the wire format and RPC layer.
-- Native transport implementation (`transport/`) with bindings for Bun/Node (`bun-transport/`).
+- Native transport implementation (`transport/`) with Bun integration (`bun-transport/`).
 
 This combination minimizes serialization and syscalls overhead compared to heavier network-first stacks.
 
@@ -207,7 +213,7 @@ This makes migration and dump management part of the engine workflow, not an ext
 
 - `storage/`: core storage runtime and multi-engine dispatch.
 - `transport/`: Cap'n Proto transport layer and wire protocol implementation.
-- `bun-transport/`: Bun/Node-compatible bindings for integration from JS services.
+- `bun-transport/`: Bun bindings for integration with the native transport layer.
 
 ## Data Layout
 
