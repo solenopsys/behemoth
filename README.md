@@ -7,7 +7,7 @@
 ![Status](https://img.shields.io/badge/status-active%20development-orange)
 ![Build](https://img.shields.io/badge/build-manual%20checks-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blueviolet)
-![License](https://img.shields.io/badge/license-not%20specified-lightgrey)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
 Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
@@ -112,7 +112,7 @@ This keeps the write path deterministic while enabling scale-out reads and resil
 - Stage: active development with production-oriented architecture.
 - Runtime model today: single-node, isolated micro-stores.
 - Replication model: currently roadmap (`single writer + replicated read copies`).
-- Repository metadata: license file and formal release process are not yet published here.
+- License: Apache License 2.0 (`LICENSE`) with copyright holder `Aleksei Shtorm`.
 
 ## Purpose
 
