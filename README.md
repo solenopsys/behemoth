@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="behemoth.png" width="840"/>
+  <img src="behemoth.png" width="672"/>
 </p>
 
 # Behemoth
