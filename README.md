@@ -9,12 +9,10 @@
 ![Version](https://img.shields.io/badge/version-0.1.0-blueviolet)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
-Behemoth executes storage work in native services outside application event loops.  
-Each service or tenant can own a compact isolated store boundary.
-
 Behemoth is a storage layer for true microservices: small, specialized stores instead of a single shared database.
 
-It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
+Behemoth executes storage work in native services outside application event loops.  
+Each service or tenant can own a compact isolated store boundary. It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
 
 ## Problem Statement
 
