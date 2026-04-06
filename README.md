@@ -4,6 +4,10 @@
 
 # Behemoth
 
+Bun app does orchestration.  
+Behemoth executes storage work outside the Bun event loop.  
+Each service or tenant can own a compact isolated store boundary.
+
 Behemoth is a native multi-engine data platform focused on one practical goal: provide the right storage model for each workload behind a single runtime and transport surface.
 
 It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
@@ -15,6 +19,11 @@ Behemoth is designed to solve a concrete bottleneck: I/O pressure in Bun-centric
 The project moves critical data-path operations into native components and a dedicated transport/runtime layer to avoid event-loop stalls, reduce latency spikes, and maximize useful work per CPU time slice.
 
 It also addresses architectural coupling problems typical for shared monolithic databases in SaaS systems: large shared indexes, tenant data mixing risk, and difficult service-level evolution.
+
+## Contrast: Traditional vs Behemoth
+
+- Traditional way: Bun + shared Postgres/Redis/Vector DB + cross-service coupling.
+- Behemoth way: Bun + native transport + per-service/per-tenant micro-stores.
 
 ## Target Environments
 
@@ -147,6 +156,32 @@ Behemoth transport is optimized for very fast local/native communication:
 - Native transport implementation (`transport/`) with bindings for Bun/Node (`bun-transport/`).
 
 This combination minimizes serialization and syscalls overhead compared to heavier network-first stacks.
+
+## Minimal Execution Example (bun-transport)
+
+```ts
+import { StorageConnection } from "bun-transport";
+
+const conn = new StorageConnection({
+  kind: "unix",
+  socketPath: "/run/behemoth.sock",
+});
+
+// 1) create/open isolated stores
+conn.open("ms-sales", "tenant-42-kv", "kv");
+conn.open("ms-sales", "tenant-42-sql", "sql");
+
+// 2) put/get in KV store
+conn.kvPut("ms-sales", "tenant-42-kv", "status", Buffer.from("active"));
+const status = conn.kvGet("ms-sales", "tenant-42-kv", "status");
+console.log(status?.toString("utf8")); // active
+
+// 3) SQL query in SQL store
+conn.execSql("ms-sales", "tenant-42-sql", "create table if not exists users(id integer primary key, name text)");
+conn.execSql("ms-sales", "tenant-42-sql", "insert into users(name) values ('Alice')");
+const rows = conn.querySql("ms-sales", "tenant-42-sql", "select id, name from users order by id desc limit 1");
+console.log(rows);
+```
 
 ## Concurrency Model
 
