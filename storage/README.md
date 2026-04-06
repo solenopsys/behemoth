@@ -1,26 +1,7 @@
-# storage
+# Behemoth Storage
 
-## Сборка
+## Purpose
+Implements the core native storage engine used by platform services.
 
-```bash
-zig build -Dall -Doptimize=ReleaseFast
-```
-
-## Контейнер
-
-```bash
-podman build --layers -f ./Containerfile -t converged-storage .
-```
-
-## Структура данных
-
-```
-<data-dir>/
-  <ms-name>/
-    <store-name>/
-      manifest.json
-      data/
-        data.db    # SQL
-        mdbx.dat   # KV
-        ...        # FILES
-```
+## Responsibility Boundary
+Owns low-level persistence and data layout mechanics; does not own network protocol handling or application-domain validation rules.
