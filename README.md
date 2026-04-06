@@ -1,6 +1,9 @@
-# Behemoth
+# Behemoth - Storage
 
-Application layer does orchestration.  
+<p align="center">
+  <img src="behemoth.png" width="672"/>
+</p>
+ 
 Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
 
@@ -8,9 +11,7 @@ Behemoth is a native multi-engine data platform focused on one practical goal: p
 
 It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
 
-<p align="center">
-  <img src="behemoth.png" width="672"/>
-</p>
+
 
 ## Problem Statement
 
