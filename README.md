@@ -4,6 +4,11 @@
  
 # Behemoth - Storage
 
+![Status](https://img.shields.io/badge/status-active%20development-orange)
+![Build](https://img.shields.io/badge/build-manual%20checks-blue)
+![Version](https://img.shields.io/badge/version-0.1.0-blueviolet)
+![License](https://img.shields.io/badge/license-not%20specified-lightgrey)
+
 Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
 
@@ -21,8 +26,14 @@ It also addresses architectural coupling problems typical for shared monolithic 
 
 ## Contrast: Traditional vs Behemoth
 
-- Traditional way: app runtime + shared Postgres/Redis/Vector DB + cross-service coupling.
-- Behemoth way: app runtime + native transport + per-service/per-tenant micro-stores.
+| Dimension | Traditional (Shared DB Stack) | Behemoth (Micro-Store Stack) |
+| --- | --- | --- |
+| Runtime coupling | App runtime contends with shared DB pressure | App orchestration is separated from native storage execution |
+| Data topology | Large shared databases per environment | Per-service and per-tenant compact stores |
+| Index growth | Global index bloat over time | Small local indexes per store boundary |
+| Fault blast radius | Single DB failures can impact many services/tenants | Store-level isolation contains failures |
+| Migrations and dumps | Global coordination and heavy snapshots | Targeted per-service migration and compact dumps |
+| Horizontal scaling | Requires heavier cross-service partitioning plans | Naturally partitioned by service/tenant boundaries |
 
 ## Public Benchmark Snapshot
 
@@ -96,6 +107,13 @@ For clustered deployments, the planned replication model is:
 
 This keeps the write path deterministic while enabling scale-out reads and resilient recovery topologies.
 
+## Status
+
+- Stage: active development with production-oriented architecture.
+- Runtime model today: single-node, isolated micro-stores.
+- Replication model: currently roadmap (`single writer + replicated read copies`).
+- Repository metadata: license file and formal release process are not yet published here.
+
 ## Purpose
 
 Provide a unified native data runtime for platform services that need different storage models without fragmenting the architecture into many unrelated data stacks.
@@ -132,7 +150,7 @@ It does not own product business workflows, UI logic, or domain orchestration po
 
 ### `ryugraph` (Graph Foundation)
 
-`ryugraph` is used as the graph-specialized backend so graph traversal and graph-shaped query patterns stay isolated from SQL/KV concerns. Public, standardized, independently reproduced benchmark figures for this exact engine are currently less established than for SQLite/LMDB-family engines, so Behemoth treats it as a specialized graph path chosen for workload fit, not generic graph leaderboard claims.
+`ryugraph` is used as the graph-specialized backend so graph traversal and graph-shaped query patterns stay isolated from SQL/KV concerns. Public, standardized, independently reproduced benchmark figures for this exact engine are currently less established than for SQLite/LMDB-family engines, so Behemoth treats it as a specialized graph path chosen for workload fit, not generic graph leaderboard claims. References: https://ryugraph.io/docs and local wrapper sources in `native/wrapers/ryugraph`.
 
 ### Filesystem Engine (`std.fs`)
 
@@ -151,6 +169,7 @@ Benchmark numbers above come from publicly available engine documentation and be
 - SQLite: `Internal Versus External BLOBs` (`kvtest`) — https://www.sqlite.org/intern-v-extern-blob.html
 - libmdbx: README benchmark note vs LMDB (`+10–20%`, up to `+30%`) — https://github.com/isar/libmdbx
 - sqlite-vec: public benchmark post by project author — https://alexgarcia.xyz/blog/2024/sqlite-vec-stable-release/
+- RyuGraph docs — https://ryugraph.io/docs
 
 ## Transport Architecture
 
