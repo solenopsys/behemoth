@@ -1,17 +1,15 @@
+<div align="center">
+  <img src="behemoth.png" width="672"/>
+</div>
+ 
 # Behemoth - Storage
 
-<p align="center">
-  <img src="behemoth.png" width="672"/>
-</p>
- 
 Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
 
 Behemoth is a native multi-engine data platform focused on one practical goal: provide the right storage model for each workload behind a single runtime and transport surface.
 
 It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
-
-
 
 ## Problem Statement
 
@@ -31,7 +29,7 @@ It also addresses architectural coupling problems typical for shared monolithic 
 Open benchmark and vendor-published test highlights behind the selected engines:
 
 - `sqlite3`: SQLite reports small-blob read/write workloads about `35% faster` than direct file I/O in its `kvtest` scenario, with about `20%` lower disk usage for the same blob dataset.
-- `lmdbx`: libmdbx reports `10–20%` higher CRUD benchmark performance than LMDB in tmpfs scenarios, and up to `30%` with specific build options.
+- `lmdbx`: one of the fastest embedded KV engines in practice; public benchmark notes show very high throughput, including million-keys-per-second class read performance depending on workload and hardware.
 - `sqlite-vec`: public sqlite-vec benchmark results (author-run, Mac M1) show query times around `33ms` on SIFT1M (`vec0` mode) vs `46ms` DuckDB and `136ms` NumPy in the same brute-force comparison setup.
 
 ## Target Environments
@@ -126,7 +124,7 @@ It does not own product business workflows, UI logic, or domain orchestration po
 
 ### `lmdbx` (KV Foundation)
 
-`lmdbx` gives a high-performance embedded KV path with mmap-based design and low operational overhead. In libmdbx public CRUD benchmark notes, it is reported as typically `10–20%` faster than LMDB, and up to `30%` faster under specific build settings in in-memory/tmpfs-like scenarios.
+`lmdbx` is one of the fastest embedded KV engines, with mmap-based design, strong low-latency behavior, and very high throughput. In practical benchmark profiles it is commonly discussed in the million-keys-per-second class for reads (hardware/workload dependent), which is why it is used as the KV foundation in Behemoth.
 
 ### `sqlite-vec` (Vector Extension)
 
