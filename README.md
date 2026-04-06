@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="behemoth.png" width="672"/>
-</p>
-
 # Behemoth
 
 Application layer does orchestration.  
@@ -11,6 +7,10 @@ Each service or tenant can own a compact isolated store boundary.
 Behemoth is a native multi-engine data platform focused on one practical goal: provide the right storage model for each workload behind a single runtime and transport surface.
 
 It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
+
+<p align="center">
+  <img src="behemoth.png" width="672"/>
+</p>
 
 ## Problem Statement
 
