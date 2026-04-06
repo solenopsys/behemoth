@@ -12,7 +12,7 @@
 Behemoth executes storage work in native services outside application event loops.  
 Each service or tenant can own a compact isolated store boundary.
 
-Behemoth is a native multi-engine data platform focused on one practical goal: provide the right storage model for each workload behind a single runtime and transport surface.
+Behemoth is a storage layer for true microservices: small, specialized stores instead of a single shared database.
 
 It combines relational, key-value, columnar, vector, file, and graph capabilities in one service, while keeping the implementation compact and deployment-friendly.
 
