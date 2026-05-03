@@ -241,6 +241,20 @@ const StoreOp = struct {
         const self: *StoreOp = @ptrCast(@alignCast(ctx));
         stores_rwlock.lockShared();
         defer stores_rwlock.unlockShared();
+
+        const inst = self.commands.stores.getPtr(self.store_key) orelse {
+            self.op_err = error.StoreNotFound;
+            return;
+        };
+
+        if (locksStoreExclusive(self.cmd)) {
+            inst.rwlock.lock();
+            defer inst.rwlock.unlock();
+        } else {
+            inst.rwlock.lockShared();
+            defer inst.rwlock.unlockShared();
+        }
+
         self.run() catch |e| {
             self.op_err = e;
         };
@@ -414,6 +428,22 @@ const StoreOp = struct {
     }
 };
 
+fn locksStoreExclusive(cmd: c_uint) bool {
+    return switch (cmd) {
+        c.REQ_EXEC_SQL,
+        c.REQ_MIGRATE,
+        c.REQ_ARCHIVE,
+        c.REQ_KV_PUT,
+        c.REQ_KV_DELETE,
+        c.REQ_KV_COMPACT,
+        c.REQ_FILE_PUT,
+        c.REQ_FILE_DELETE,
+        c.REQ_DUMP_CREATE,
+        => true,
+        else => false,
+    };
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 const CBytes = struct { ptr: ?[*]u8, len: usize };
@@ -482,14 +512,6 @@ fn dispatch(
                 return encodeKeys(tel, key_ptrs[0..i]);
             }
             // Store-specific FILE_LIST falls through to worker dispatch
-        },
-        c.REQ_DUMP_CREATE => {
-            stores_rwlock.lockShared();
-            defer stores_rwlock.unlockShared();
-            const file_name = try commands.createDump(ms, store);
-            defer allocator.free(file_name);
-            tel.op_count += 1;
-            return encodeData(tel, file_name);
         },
         c.REQ_DUMP_LIST => {
             const entries = try commands.listDumps();

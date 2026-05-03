@@ -27,6 +27,7 @@ pub const StoreInstance = struct {
     manifest_path: []const u8,
     data_path_z: ?[:0]u8,
     store_dir: []const u8,
+    rwlock: std.Thread.RwLock = .{},
 };
 
 pub const DumpEntry = struct {
