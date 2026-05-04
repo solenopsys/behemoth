@@ -7,8 +7,12 @@ using Common = import "common.capnp";
 # All store types share this interface — no type-specific data access here.
 
 interface StoreManagement {
-  # Open a store, creating it on disk if it does not yet exist.
-  open @0 (ms :Text, store :Text, storeType :Common.StoreType)
+  # Create a store manifest if it does not exist. Existing stores keep their manifest type.
+  create @0 (ms :Text, store :Text, storeType :Common.StoreType)
+       -> (telemetry :Common.Telemetry);
+
+  # Open an existing store by manifest. The requested type is never supplied by clients here.
+  open @6 (ms :Text, store :Text)
        -> (telemetry :Common.Telemetry);
 
   # Release in-memory handles.  Data remains on disk.

@@ -134,6 +134,13 @@ pub const SqlEngine = struct {
         return stat.size;
     }
 
+    pub fn getCacheBytes(self: *SqlEngine) u64 {
+        var cur: c_int = 0;
+        var hi: c_int = 0;
+        _ = c.sqlite3_db_status(self.db.?, c.SQLITE_DBSTATUS_CACHE_USED, &cur, &hi, 0);
+        return if (cur > 0) @intCast(cur) else 0;
+    }
+
     pub fn execPragma(self: *SqlEngine, pragma: [*:0]const u8) !void {
         const rc = c.sqlite3_exec(self.db.?, pragma, null, null, null);
         if (rc != c.SQLITE_OK) return error.SqlitePragmaFailed;

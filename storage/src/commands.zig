@@ -1,6 +1,5 @@
 const std = @import("std");
 const fs_compat = @import("fs_compat.zig");
-const sync_compat = @import("sync_compat.zig");
 const Allocator = std.mem.Allocator;
 const manifest_mod = @import("manifest.zig");
 const Manifest = manifest_mod.Manifest;
@@ -41,7 +40,6 @@ pub const StoreInstance = struct {
     manifest_path: []const u8,
     data_path_z: ?[:0]u8,
     store_dir: []const u8,
-    rwlock: sync_compat.RwLock = .{},
 };
 
 pub const DumpEntry = struct {
@@ -185,13 +183,33 @@ pub const StorageCommands = struct {
 
     // ── Store lifecycle ──
 
+    pub fn createStore(self: *StorageCommands, ms_name: []const u8, store_name: []const u8, store_type: StoreType) !void {
+        try self.openStore(ms_name, store_name, store_type);
+    }
+
+    pub fn openExistingStore(self: *StorageCommands, ms_name: []const u8, store_name: []const u8) !void {
+        const store_dir = try std.fmt.allocPrint(self.allocator, "{s}/{s}/{s}", .{ self.data_dir, ms_name, store_name });
+        defer self.allocator.free(store_dir);
+
+        const manifest_path = try std.fmt.allocPrint(self.allocator, "{s}/manifest.json", .{store_dir});
+        defer self.allocator.free(manifest_path);
+
+        var manifest = try manifest_mod.Manifest.load(self.allocator, manifest_path);
+        defer manifest.deinit();
+
+        try self.openStore(ms_name, store_name, manifest.store_type);
+    }
+
     pub fn openStore(self: *StorageCommands, ms_name: []const u8, store_name: []const u8, store_type: StoreType) !void {
         const store_dir = try std.fmt.allocPrint(self.allocator, "{s}/{s}/{s}", .{ self.data_dir, ms_name, store_name });
         defer self.allocator.free(store_dir);
         const store_key = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ ms_name, store_name });
         errdefer self.allocator.free(store_key);
 
-        if (self.stores.contains(store_key)) {
+        if (self.stores.getPtr(store_key)) |inst| {
+            if (std.meta.activeTag(inst.handle) != store_type) {
+                return error.StoreTypeMismatch;
+            }
             self.allocator.free(store_key);
             return;
         }
@@ -210,6 +228,7 @@ pub const StorageCommands = struct {
             var manifest = mfst;
             manifest.deinit();
         }
+        if (mfst.store_type != store_type) return error.StoreTypeMismatch;
 
         var data_path_z: ?[:0]u8 = null;
         var handle: StoreHandle = undefined;
@@ -420,6 +439,24 @@ pub const StorageCommands = struct {
             }
         }
         return total;
+    }
+
+    pub const StoreStats = struct {
+        cache_bytes: u64,
+        disk_bytes: u64,
+    };
+
+    pub fn getStoreStats(self: *StorageCommands, store_key: []const u8) !StoreStats {
+        const inst = self.stores.getPtr(store_key) orelse return error.StoreNotFound;
+        const cache_bytes: u64 = switch (inst.handle) {
+            .sql => |*e| @constCast(e).getCacheBytes(),
+            .column => |*e| @constCast(e).sql.getCacheBytes(),
+            .vector => |*e| @constCast(e).sql.getCacheBytes(),
+            .kv => |*e| @constCast(e).getCacheBytes(),
+            .files, .graph => 0,
+        };
+        const disk_bytes = try self.getStoreSize(store_key);
+        return .{ .cache_bytes = cache_bytes, .disk_bytes = disk_bytes };
     }
 
     pub fn getManifest(self: *StorageCommands, store_key: []const u8) ?*const Manifest {

@@ -94,11 +94,20 @@ extern "C" TransportRequest* transport_req_shutdown(void) {
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_shutdown")
 }
 
-extern "C" TransportRequest* transport_req_open(const char* ms, const char* store, StoreTypeC store_type) {
+extern "C" TransportRequest* transport_req_create(const char* ms, const char* store, StoreTypeC store_type) {
     try {
         auto* r = make_req(ms, store);
         if (!r) return nullptr;
-        r->req.getBody().initOpen().setStoreType(static_cast<StoreType>(store_type));
+        r->req.getBody().initCreate().setStoreType(static_cast<StoreType>(store_type));
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_create")
+}
+
+extern "C" TransportRequest* transport_req_open(const char* ms, const char* store) {
+    try {
+        auto* r = make_req(ms, store);
+        if (!r) return nullptr;
+        r->req.getBody().setOpen();
         return r;
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_open")
 }
@@ -137,6 +146,15 @@ extern "C" TransportRequest* transport_req_size(const char* ms, const char* stor
         r->req.getBody().setSize();
         return r;
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_size")
+}
+
+extern "C" TransportRequest* transport_req_store_stats(const char* ms, const char* store) {
+    try {
+        auto* r = make_req(ms, store);
+        if (!r) return nullptr;
+        r->req.getBody().setStoreStats();
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_store_stats")
 }
 
 extern "C" TransportRequest* transport_req_manifest(const char* ms, const char* store) {
@@ -553,6 +571,22 @@ extern "C" const char* transport_resp_manifest_migration_at(TransportResponse* r
     } catch (...) { return nullptr; }
 }
 
+extern "C" uint64_t transport_resp_stats_cache_bytes(TransportResponse* resp) {
+    if (!resp) return 0;
+    try {
+        if (resp->resp.getResult().which() != Response::Result::STORE_STATS) return 0;
+        return resp->resp.getResult().getStoreStats().getCacheBytes();
+    } catch (...) { return 0; }
+}
+
+extern "C" uint64_t transport_resp_stats_disk_bytes(TransportResponse* resp) {
+    if (!resp) return 0;
+    try {
+        if (resp->resp.getResult().which() != Response::Result::STORE_STATS) return 0;
+        return resp->resp.getResult().getStoreStats().getDiskBytes();
+    } catch (...) { return 0; }
+}
+
 extern "C" uint32_t transport_resp_pair_count(TransportResponse* resp) {
     if (!resp) return 0;
     try {
@@ -644,8 +678,8 @@ extern "C" const char* transport_req_reader_store(TransportRequestReader* r) {
 extern "C" StoreTypeC transport_req_reader_store_type(TransportRequestReader* r) {
     if (!r) return STORE_SQL;
     try {
-        if (r->req.getBody().which() != Request::Body::OPEN) return STORE_SQL;
-        return static_cast<StoreTypeC>(r->req.getBody().getOpen().getStoreType());
+        if (r->req.getBody().which() != Request::Body::CREATE) return STORE_SQL;
+        return static_cast<StoreTypeC>(r->req.getBody().getCreate().getStoreType());
     } catch (...) { return STORE_SQL; }
 }
 extern "C" const char* transport_req_reader_sql(TransportRequestReader* r) {
@@ -848,6 +882,19 @@ extern "C" int32_t transport_encode_manifest(uint8_t** out, size_t* out_len, Tel
         for (uint32_t i = 0; i < mig_count; i++) migs.set(i, migrations[i] ? migrations[i] : "");
         return encodeResponse(msg, out, out_len);
     } TRANSPORT_CATCH_RET(-1, "transport_encode_manifest")
+}
+
+extern "C" int32_t transport_encode_store_stats(uint8_t** out, size_t* out_len, TelemetryC tel,
+                                                uint64_t cache_bytes, uint64_t disk_bytes) {
+    try {
+        capnp::MallocMessageBuilder msg;
+        auto resp = msg.initRoot<Response>();
+        setTelemetry(resp, tel);
+        auto s = resp.getResult().initStoreStats();
+        s.setCacheBytes(cache_bytes);
+        s.setDiskBytes(disk_bytes);
+        return encodeResponse(msg, out, out_len);
+    } TRANSPORT_CATCH_RET(-1, "transport_encode_store_stats")
 }
 
 extern "C" int32_t transport_encode_kv_pairs(uint8_t** out, size_t* out_len, TelemetryC tel,

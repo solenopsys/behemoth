@@ -18,7 +18,8 @@ const SYMBOLS = {
   // Request builders
   transport_req_ping:       { args: [],                                                         returns: FFIType.ptr },
   transport_req_shutdown:   { args: [],                                                         returns: FFIType.ptr },
-  transport_req_open:       { args: [FFIType.cstring, FFIType.cstring, FFIType.u8],            returns: FFIType.ptr },
+  transport_req_create:     { args: [FFIType.cstring, FFIType.cstring, FFIType.u8],            returns: FFIType.ptr },
+  transport_req_open:       { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
   transport_req_close:      { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
   transport_req_exec_sql:   { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_query_sql:  { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
@@ -39,6 +40,7 @@ const SYMBOLS = {
   transport_req_dump_list:   { args: [],                                                         returns: FFIType.ptr },
   transport_req_dump_delete: { args: [FFIType.cstring],                                          returns: FFIType.ptr },
   transport_req_dump_read:   { args: [FFIType.cstring, FFIType.u64, FFIType.u32],               returns: FFIType.ptr },
+  transport_req_store_stats: { args: [FFIType.cstring, FFIType.cstring],                        returns: FFIType.ptr },
   transport_req_free:       { args: [FFIType.ptr],                                             returns: FFIType.void },
 
   // Response accessors
@@ -69,6 +71,9 @@ const SYMBOLS = {
   transport_req_reader_file_name:    { args: [FFIType.ptr], returns: FFIType.ptr },
   transport_req_reader_dump_offset:  { args: [FFIType.ptr], returns: FFIType.u64 },
   transport_req_reader_dump_length:  { args: [FFIType.ptr], returns: FFIType.u32 },
+  // Store stats
+  transport_resp_stats_cache_bytes: { args: [FFIType.ptr], returns: FFIType.u64 },
+  transport_resp_stats_disk_bytes:  { args: [FFIType.ptr], returns: FFIType.u64 },
   // KV pairs
   transport_resp_pair_count:     { args: [FFIType.ptr], returns: FFIType.u32 },
   transport_resp_pair_key_at:    { args: [FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
@@ -157,6 +162,13 @@ export const ValueType = { null: 0, integer: 1, real: 2, text: 3, blob: 4 } as c
 export interface Telemetry { durationUs: bigint; opCount: number; }
 
 export interface Row { [column: string]: null | bigint | number | string | Buffer; }
+
+export interface StoreStats {
+  /** RAM: SQLite page cache bytes or LMDBX used-pages bytes. 0 for files/graph. */
+  cacheBytes: bigint;
+  /** On-disk file size in bytes. */
+  diskBytes: bigint;
+}
 
 export interface ManifestInfo {
   name: string;
@@ -408,8 +420,12 @@ export class StorageConnection {
 
   // ── Store management ─────────────────────────────────────────────────────
 
-  open(ms: string, store: string, storeType: StoreTypeKey): Telemetry {
-    return this.sendRecv(() => s.transport_req_open(cstr(ms), cstr(store), StoreType[storeType]) as number).telemetry();
+  create(ms: string, store: string, storeType: StoreTypeKey): Telemetry {
+    return this.sendRecv(() => s.transport_req_create(cstr(ms), cstr(store), StoreType[storeType]) as number).telemetry();
+  }
+
+  open(ms: string, store: string): Telemetry {
+    return this.sendRecv(() => s.transport_req_open(cstr(ms), cstr(store)) as number).telemetry();
   }
 
   close_store(ms: string, store: string): Telemetry {
@@ -419,6 +435,11 @@ export class StorageConnection {
   getSize(ms: string, store: string): bigint {
     const resp = this.sendRecv(() => s.transport_req_size(cstr(ms), cstr(store)) as number);
     return resp.size();
+  }
+
+  getStats(ms: string, store: string): StoreStats {
+    const resp = this.sendRecv(() => s.transport_req_store_stats(cstr(ms), cstr(store)) as number);
+    return resp.storeStats();
   }
 
   getManifest(ms: string, store: string): ManifestInfo {
@@ -591,6 +612,13 @@ class Response {
     const v = s.transport_resp_size(this.handle) as bigint;
     this.free();
     return v;
+  }
+
+  storeStats(): StoreStats {
+    const cacheBytes = s.transport_resp_stats_cache_bytes(this.handle) as bigint;
+    const diskBytes  = s.transport_resp_stats_disk_bytes(this.handle) as bigint;
+    this.free();
+    return { cacheBytes, diskBytes };
   }
 
   rows(): Row[] {

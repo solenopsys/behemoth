@@ -244,20 +244,6 @@ const StoreOp = struct {
         const self: *StoreOp = @ptrCast(@alignCast(ctx));
         stores_rwlock.lockShared();
         defer stores_rwlock.unlockShared();
-
-        const inst = self.commands.stores.getPtr(self.store_key) orelse {
-            self.op_err = error.StoreNotFound;
-            return;
-        };
-
-        if (locksStoreExclusive(self.cmd)) {
-            inst.rwlock.lock();
-            defer inst.rwlock.unlock();
-        } else {
-            inst.rwlock.lockShared();
-            defer inst.rwlock.unlockShared();
-        }
-
         self.run() catch |e| {
             self.op_err = e;
         };
@@ -281,6 +267,11 @@ const StoreOp = struct {
                 const size = try self.commands.getStoreSize(self.store_key);
                 tel.op_count += 1;
                 self.result = encodeSize(tel, size);
+            },
+            c.REQ_STATS => {
+                const stats = try self.commands.getStoreStats(self.store_key);
+                tel.op_count += 1;
+                self.result = encodeStoreStats(tel, stats.cache_bytes, stats.disk_bytes);
             },
             c.REQ_MANIFEST => {
                 const m = self.commands.getManifest(self.store_key) orelse return error.StoreNotFound;
@@ -435,22 +426,6 @@ const StoreOp = struct {
     }
 };
 
-fn locksStoreExclusive(cmd: c_uint) bool {
-    return switch (cmd) {
-        c.REQ_EXEC_SQL,
-        c.REQ_MIGRATE,
-        c.REQ_ARCHIVE,
-        c.REQ_KV_PUT,
-        c.REQ_KV_DELETE,
-        c.REQ_KV_COMPACT,
-        c.REQ_FILE_PUT,
-        c.REQ_FILE_DELETE,
-        c.REQ_DUMP_CREATE,
-        => true,
-        else => false,
-    };
-}
-
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 const CBytes = struct { ptr: ?[*]u8, len: usize };
@@ -481,9 +456,16 @@ fn dispatch(
         c.REQ_OPEN => {
             stores_rwlock.lock();
             defer stores_rwlock.unlock();
+            try commands.openExistingStore(ms, store);
+            tel.op_count += 1;
+            return encodeOk(tel);
+        },
+        c.REQ_CREATE => {
+            stores_rwlock.lock();
+            defer stores_rwlock.unlock();
             const raw = @as(u8, @intCast(c.transport_req_reader_store_type(reader)));
             const st: StoreType = @enumFromInt(raw);
-            try commands.openStore(ms, store, st);
+            try commands.createStore(ms, store, st);
             tel.op_count += 1;
             return encodeOk(tel);
         },
@@ -682,6 +664,12 @@ fn encodeSize(tel: Telemetry, size: u64) CBytes {
     var p: ?[*]u8 = null;
     var l: usize = 0;
     _ = c.transport_encode_size(&p, &l, telC(tel), size);
+    return .{ .ptr = p, .len = l };
+}
+fn encodeStoreStats(tel: Telemetry, cache_bytes: u64, disk_bytes: u64) CBytes {
+    var p: ?[*]u8 = null;
+    var l: usize = 0;
+    _ = c.transport_encode_store_stats(&p, &l, telC(tel), cache_bytes, disk_bytes);
     return .{ .ptr = p, .len = l };
 }
 fn encodeFound(tel: Telemetry, found: i32, data: []const u8) CBytes {

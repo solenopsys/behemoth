@@ -27,7 +27,7 @@ struct Request {
   body :union {
     ping        @2  :Void;
     shutdown    @3  :Void;
-    open        @4  :OpenBody;
+    open        @4  :Void;
     close       @5  :Void;
     execSql     @6  :SqlBody;
     querySql    @7  :SqlBody;
@@ -49,9 +49,11 @@ struct Request {
     dumpList    @23 :Void;
     dumpDelete  @24 :DumpDeleteBody;
     dumpRead    @25 :DumpReadBody;
+    create      @26 :CreateBody;
+    storeStats  @27 :Void;
   }
 
-  struct OpenBody      { storeType @0 :StoreType; }
+  struct CreateBody    { storeType @0 :StoreType; }
   struct SqlBody       { sql @0 :Text; }
   struct MigrateBody   { migrationId @0 :Text; }
   struct ArchiveBody   { outputPath @0 :Text; }
@@ -83,8 +85,14 @@ struct Response {
     manifest @7  :ManifestData;
     found    @8  :FoundData;
     affected @9  :Int64;
-    search   @10 :List(SearchResult);
-    pairs    @11 :List(KvPair);
+    search     @10 :List(SearchResult);
+    pairs      @11 :List(KvPair);
+    storeStats @12 :StoreStatData;
+  }
+
+  struct StoreStatData {
+    cacheBytes @0 :UInt64;  # RAM: SQLite page cache or LMDBX mapped used pages
+    diskBytes  @1 :UInt64;  # on-disk file size
   }
 
   struct KvPair {

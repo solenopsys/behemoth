@@ -87,6 +87,26 @@ test "open is idempotent and store can close/reopen" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"count\":1") != null);
 }
 
+test "open rejects type mismatch for existing manifest or open store" {
+    fs_compat.setIo(std.testing.io);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
+
+    var commands = StorageCommands.init(std.testing.allocator, data_dir);
+    defer commands.deinit();
+
+    try commands.openStore("sheduller-ms", "crons", StoreType.sql);
+    try std.testing.expectError(error.StoreTypeMismatch, commands.openStore("sheduller-ms", "crons", StoreType.files));
+
+    commands.closeStore("sheduller-ms/crons");
+    try std.testing.expectError(error.StoreTypeMismatch, commands.openStore("sheduller-ms", "crons", StoreType.files));
+
+    try commands.openStore("sheduller-ms", "crons", StoreType.sql);
+}
+
 test "error in one store type does not break others" {
     fs_compat.setIo(std.testing.io);
     var tmp = std.testing.tmpDir(.{});
@@ -259,6 +279,96 @@ test "store controllers process sql/kv/vector/files independently across threads
     const vec_json = try commands.querySql("vec-ms/vec", "SELECT COUNT(*) as count FROM t_vec", &tel);
     defer std.testing.allocator.free(vec_json);
     try std.testing.expect(std.mem.indexOf(u8, vec_json, "\"count\":120") != null);
+}
+
+const ConcWriteCtx = struct {
+    commands: *StorageCommands,
+    store_key: []const u8,
+    id: usize,
+    failed: *std.atomic.Value(bool),
+};
+
+fn concWriteExec(ctx_ptr: ?*anyopaque) void {
+    const ctx: *ConcWriteCtx = @ptrCast(@alignCast(ctx_ptr.?));
+    var buf: [128]u8 = undefined;
+    const stmt = std.fmt.bufPrintZ(&buf, "INSERT INTO conc(v) VALUES ('w-{d}')", .{ctx.id}) catch {
+        ctx.failed.store(true, .seq_cst);
+        return;
+    };
+    ctx.commands.execSql(ctx.store_key, stmt) catch {
+        ctx.failed.store(true, .seq_cst);
+    };
+}
+
+test "multiple clients submit ops to same store via worker without per-store lock" {
+    fs_compat.setIo(std.testing.io);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
+
+    var commands = StorageCommands.init(std.testing.allocator, data_dir);
+    defer commands.deinit();
+
+    try commands.openStore("ms", "shared", StoreType.sql);
+    try commands.execSql("ms/shared", "CREATE TABLE IF NOT EXISTS conc (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)");
+
+    var pool = ThreadPool.init(std.testing.allocator);
+    defer pool.deinit();
+    try pool.start();
+    defer pool.stop();
+
+    const N = 20;
+    var failed = std.atomic.Value(bool).init(false);
+    var ctxs: [N]ConcWriteCtx = undefined;
+    var items: [N]WorkItem = undefined;
+
+    for (0..N) |i| {
+        ctxs[i] = .{ .commands = &commands, .store_key = "ms/shared", .id = i, .failed = &failed };
+        items[i] = .{
+            .store_key = "ms/shared",
+            .op = .exec_sql,
+            .payload = &[_]u8{},
+            .result = null,
+            .done = .{},
+            .err = null,
+            .exec_ctx = &ctxs[i],
+            .exec_fn = concWriteExec,
+        };
+    }
+
+    // Simulate N clients concurrently submitting to the same sql worker
+    const SubmitCtx = struct {
+        pool: *ThreadPool,
+        items_ptr: [*]WorkItem,
+        start: usize,
+        end: usize,
+
+        fn run(self: *const @This()) void {
+            for (self.start..self.end) |i| {
+                self.pool.getWorker(.sql).submit(&self.items_ptr[i]);
+            }
+        }
+    };
+    const half = N / 2;
+    var s1 = SubmitCtx{ .pool = &pool, .items_ptr = &items, .start = 0, .end = half };
+    var s2 = SubmitCtx{ .pool = &pool, .items_ptr = &items, .start = half, .end = N };
+    const t1 = try std.Thread.spawn(.{}, SubmitCtx.run, .{&s1});
+    const t2 = try std.Thread.spawn(.{}, SubmitCtx.run, .{&s2});
+    t1.join();
+    t2.join();
+
+    for (&items) |*item| {
+        try item.done.timedWait(2 * std.time.ns_per_s);
+    }
+
+    try std.testing.expect(!failed.load(.seq_cst));
+
+    var tel = Telemetry.begin();
+    const json = try commands.querySql("ms/shared", "SELECT COUNT(*) as count FROM conc", &tel);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"count\":20") != null);
 }
 
 test "thread pool keeps store-type workers isolated" {

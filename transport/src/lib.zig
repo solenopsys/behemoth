@@ -12,6 +12,7 @@ const c = @cImport(@cInclude("transport.h"));
 
 pub const transport_req_ping = c.transport_req_ping;
 pub const transport_req_shutdown = c.transport_req_shutdown;
+pub const transport_req_create = c.transport_req_create;
 pub const transport_req_open = c.transport_req_open;
 pub const transport_req_close = c.transport_req_close;
 pub const transport_req_exec_sql = c.transport_req_exec_sql;

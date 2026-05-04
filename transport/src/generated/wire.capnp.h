@@ -30,7 +30,7 @@ enum class StoreType_8b1997aae9d03789: uint16_t {
 CAPNP_DECLARE_ENUM(StoreType, 8b1997aae9d03789);
 CAPNP_DECLARE_SCHEMA(c9d06189012b40f5);
 CAPNP_DECLARE_SCHEMA(a7112221e04e58a6);
-CAPNP_DECLARE_SCHEMA(f2659945042f3c86);
+CAPNP_DECLARE_SCHEMA(d8e0a0349bc5fd6d);
 CAPNP_DECLARE_SCHEMA(c7800a02e085611f);
 CAPNP_DECLARE_SCHEMA(c785230deb16fb07);
 CAPNP_DECLARE_SCHEMA(d431827dda2bbbf8);
@@ -44,6 +44,7 @@ CAPNP_DECLARE_SCHEMA(d30eb85190ad02d0);
 CAPNP_DECLARE_SCHEMA(dbf92c17d1c076c0);
 CAPNP_DECLARE_SCHEMA(82e27950a9944a5d);
 CAPNP_DECLARE_SCHEMA(a63aeeac83ae5e48);
+CAPNP_DECLARE_SCHEMA(c804787942f16755);
 CAPNP_DECLARE_SCHEMA(c5fa60ac174b1ea6);
 CAPNP_DECLARE_SCHEMA(d9c3230d5383114b);
 CAPNP_DECLARE_SCHEMA(de812d4aff29c1c6);
@@ -79,7 +80,7 @@ struct Request {
   class Reader;
   class Builder;
   class Pipeline;
-  struct OpenBody;
+  struct CreateBody;
   struct SqlBody;
   struct MigrateBody;
   struct ArchiveBody;
@@ -101,15 +102,15 @@ struct Request {
   };
 };
 
-struct Request::OpenBody {
-  OpenBody() = delete;
+struct Request::CreateBody {
+  CreateBody() = delete;
 
   class Reader;
   class Builder;
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(f2659945042f3c86, 1, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(d8e0a0349bc5fd6d, 1, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -312,6 +313,8 @@ struct Request::Body {
     DUMP_LIST,
     DUMP_DELETE,
     DUMP_READ,
+    CREATE,
+    STORE_STATS,
   };
 
   struct _capnpPrivate {
@@ -328,6 +331,7 @@ struct Response {
   class Reader;
   class Builder;
   class Pipeline;
+  struct StoreStatData;
   struct KvPair;
   struct Row;
   struct Value;
@@ -338,6 +342,21 @@ struct Response {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(a63aeeac83ae5e48, 2, 2)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct Response::StoreStatData {
+  StoreStatData() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(c804787942f16755, 2, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -459,6 +478,7 @@ struct Response::Result {
     AFFECTED,
     SEARCH,
     PAIRS,
+    STORE_STATS,
   };
 
   struct _capnpPrivate {
@@ -659,9 +679,9 @@ private:
 };
 #endif  // !CAPNP_LITE
 
-class Request::OpenBody::Reader {
+class Request::CreateBody::Reader {
 public:
-  typedef OpenBody Reads;
+  typedef CreateBody Reads;
 
   Reader() = default;
   inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
@@ -690,9 +710,9 @@ private:
   friend class ::capnp::Orphanage;
 };
 
-class Request::OpenBody::Builder {
+class Request::CreateBody::Builder {
 public:
-  typedef OpenBody Builds;
+  typedef CreateBody Builds;
 
   Builder() = delete;  // Deleted to discourage incorrect usage.
                        // You can explicitly initialize to nullptr instead.
@@ -719,9 +739,9 @@ private:
 };
 
 #if !CAPNP_LITE
-class Request::OpenBody::Pipeline {
+class Request::CreateBody::Pipeline {
 public:
-  typedef OpenBody Pipelines;
+  typedef CreateBody Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -1707,8 +1727,7 @@ public:
   inline  ::capnp::Void getShutdown() const;
 
   inline bool isOpen() const;
-  inline bool hasOpen() const;
-  inline  ::Request::OpenBody::Reader getOpen() const;
+  inline  ::capnp::Void getOpen() const;
 
   inline bool isClose() const;
   inline  ::capnp::Void getClose() const;
@@ -1787,6 +1806,13 @@ public:
   inline bool hasDumpRead() const;
   inline  ::Request::DumpReadBody::Reader getDumpRead() const;
 
+  inline bool isCreate() const;
+  inline bool hasCreate() const;
+  inline  ::Request::CreateBody::Reader getCreate() const;
+
+  inline bool isStoreStats() const;
+  inline  ::capnp::Void getStoreStats() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -1825,12 +1851,8 @@ public:
   inline void setShutdown( ::capnp::Void value = ::capnp::VOID);
 
   inline bool isOpen();
-  inline bool hasOpen();
-  inline  ::Request::OpenBody::Builder getOpen();
-  inline void setOpen( ::Request::OpenBody::Reader value);
-  inline  ::Request::OpenBody::Builder initOpen();
-  inline void adoptOpen(::capnp::Orphan< ::Request::OpenBody>&& value);
-  inline ::capnp::Orphan< ::Request::OpenBody> disownOpen();
+  inline  ::capnp::Void getOpen();
+  inline void setOpen( ::capnp::Void value = ::capnp::VOID);
 
   inline bool isClose();
   inline  ::capnp::Void getClose();
@@ -1972,6 +1994,18 @@ public:
   inline void adoptDumpRead(::capnp::Orphan< ::Request::DumpReadBody>&& value);
   inline ::capnp::Orphan< ::Request::DumpReadBody> disownDumpRead();
 
+  inline bool isCreate();
+  inline bool hasCreate();
+  inline  ::Request::CreateBody::Builder getCreate();
+  inline void setCreate( ::Request::CreateBody::Reader value);
+  inline  ::Request::CreateBody::Builder initCreate();
+  inline void adoptCreate(::capnp::Orphan< ::Request::CreateBody>&& value);
+  inline ::capnp::Orphan< ::Request::CreateBody> disownCreate();
+
+  inline bool isStoreStats();
+  inline  ::capnp::Void getStoreStats();
+  inline void setStoreStats( ::capnp::Void value = ::capnp::VOID);
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -2078,6 +2112,87 @@ public:
 
   inline  ::Telemetry::Pipeline getTelemetry();
   inline typename Result::Pipeline getResult();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class Response::StoreStatData::Reader {
+public:
+  typedef StoreStatData Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getCacheBytes() const;
+
+  inline  ::uint64_t getDiskBytes() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class Response::StoreStatData::Builder {
+public:
+  typedef StoreStatData Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getCacheBytes();
+  inline void setCacheBytes( ::uint64_t value);
+
+  inline  ::uint64_t getDiskBytes();
+  inline void setDiskBytes( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class Response::StoreStatData::Pipeline {
+public:
+  typedef StoreStatData Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -2731,6 +2846,10 @@ public:
   inline bool hasPairs() const;
   inline  ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUCT>::Reader getPairs() const;
 
+  inline bool isStoreStats() const;
+  inline bool hasStoreStats() const;
+  inline  ::Response::StoreStatData::Reader getStoreStats() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2836,6 +2955,14 @@ public:
   inline  ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUCT>::Builder initPairs(unsigned int size);
   inline void adoptPairs(::capnp::Orphan< ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUCT>>&& value);
   inline ::capnp::Orphan< ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUCT>> disownPairs();
+
+  inline bool isStoreStats();
+  inline bool hasStoreStats();
+  inline  ::Response::StoreStatData::Builder getStoreStats();
+  inline void setStoreStats( ::Response::StoreStatData::Reader value);
+  inline  ::Response::StoreStatData::Builder initStoreStats();
+  inline void adoptStoreStats(::capnp::Orphan< ::Response::StoreStatData>&& value);
+  inline ::capnp::Orphan< ::Response::StoreStatData> disownStoreStats();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -3005,16 +3132,16 @@ inline typename Request::Body::Builder Request::Builder::initBody() {
   _builder.getPointerField(::capnp::bounded<2>() * ::capnp::POINTERS).clear();
   return typename Request::Body::Builder(_builder);
 }
-inline  ::StoreType Request::OpenBody::Reader::getStoreType() const {
+inline  ::StoreType Request::CreateBody::Reader::getStoreType() const {
   return _reader.getDataField< ::StoreType>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
 
-inline  ::StoreType Request::OpenBody::Builder::getStoreType() {
+inline  ::StoreType Request::CreateBody::Builder::getStoreType() {
   return _builder.getDataField< ::StoreType>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline void Request::OpenBody::Builder::setStoreType( ::StoreType value) {
+inline void Request::CreateBody::Builder::setStoreType( ::StoreType value) {
   _builder.setDataField< ::StoreType>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
@@ -3642,52 +3769,24 @@ inline bool Request::Body::Reader::isOpen() const {
 inline bool Request::Body::Builder::isOpen() {
   return which() == Request::Body::OPEN;
 }
-inline bool Request::Body::Reader::hasOpen() const {
-  if (which() != Request::Body::OPEN) return false;
-  return !_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
-}
-inline bool Request::Body::Builder::hasOpen() {
-  if (which() != Request::Body::OPEN) return false;
-  return !_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
-}
-inline  ::Request::OpenBody::Reader Request::Body::Reader::getOpen() const {
+inline  ::capnp::Void Request::Body::Reader::getOpen() const {
   KJ_IREQUIRE((which() == Request::Body::OPEN),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::Request::OpenBody>::get(_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline  ::Request::OpenBody::Builder Request::Body::Builder::getOpen() {
+
+inline  ::capnp::Void Request::Body::Builder::getOpen() {
   KJ_IREQUIRE((which() == Request::Body::OPEN),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::Request::OpenBody>::get(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
 }
-inline void Request::Body::Builder::setOpen( ::Request::OpenBody::Reader value) {
+inline void Request::Body::Builder::setOpen( ::capnp::Void value) {
   _builder.setDataField<Request::Body::Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::OPEN);
-  ::capnp::_::PointerHelpers< ::Request::OpenBody>::set(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
-}
-inline  ::Request::OpenBody::Builder Request::Body::Builder::initOpen() {
-  _builder.setDataField<Request::Body::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::OPEN);
-  return ::capnp::_::PointerHelpers< ::Request::OpenBody>::init(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
-}
-inline void Request::Body::Builder::adoptOpen(
-    ::capnp::Orphan< ::Request::OpenBody>&& value) {
-  _builder.setDataField<Request::Body::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::OPEN);
-  ::capnp::_::PointerHelpers< ::Request::OpenBody>::adopt(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
-}
-inline ::capnp::Orphan< ::Request::OpenBody> Request::Body::Builder::disownOpen() {
-  KJ_IREQUIRE((which() == Request::Body::OPEN),
-              "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::Request::OpenBody>::disown(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool Request::Body::Reader::isClose() const {
@@ -4628,6 +4727,86 @@ inline ::capnp::Orphan< ::Request::DumpReadBody> Request::Body::Builder::disownD
       ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
+inline bool Request::Body::Reader::isCreate() const {
+  return which() == Request::Body::CREATE;
+}
+inline bool Request::Body::Builder::isCreate() {
+  return which() == Request::Body::CREATE;
+}
+inline bool Request::Body::Reader::hasCreate() const {
+  if (which() != Request::Body::CREATE) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::Body::Builder::hasCreate() {
+  if (which() != Request::Body::CREATE) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Request::CreateBody::Reader Request::Body::Reader::getCreate() const {
+  KJ_IREQUIRE((which() == Request::Body::CREATE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::CreateBody>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::Request::CreateBody::Builder Request::Body::Builder::getCreate() {
+  KJ_IREQUIRE((which() == Request::Body::CREATE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::CreateBody>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::setCreate( ::Request::CreateBody::Reader value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::CREATE);
+  ::capnp::_::PointerHelpers< ::Request::CreateBody>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::Request::CreateBody::Builder Request::Body::Builder::initCreate() {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::CREATE);
+  return ::capnp::_::PointerHelpers< ::Request::CreateBody>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::adoptCreate(
+    ::capnp::Orphan< ::Request::CreateBody>&& value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::CREATE);
+  ::capnp::_::PointerHelpers< ::Request::CreateBody>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Request::CreateBody> Request::Body::Builder::disownCreate() {
+  KJ_IREQUIRE((which() == Request::Body::CREATE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::CreateBody>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool Request::Body::Reader::isStoreStats() const {
+  return which() == Request::Body::STORE_STATS;
+}
+inline bool Request::Body::Builder::isStoreStats() {
+  return which() == Request::Body::STORE_STATS;
+}
+inline  ::capnp::Void Request::Body::Reader::getStoreStats() const {
+  KJ_IREQUIRE((which() == Request::Body::STORE_STATS),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::capnp::Void Request::Body::Builder::getStoreStats() {
+  KJ_IREQUIRE((which() == Request::Body::STORE_STATS),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Request::Body::Builder::setStoreStats( ::capnp::Void value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::STORE_STATS);
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
 inline bool Response::Reader::hasTelemetry() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
@@ -4684,6 +4863,34 @@ inline typename Response::Result::Builder Response::Builder::initResult() {
   _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS).clear();
   return typename Response::Result::Builder(_builder);
 }
+inline  ::uint64_t Response::StoreStatData::Reader::getCacheBytes() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t Response::StoreStatData::Builder::getCacheBytes() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Response::StoreStatData::Builder::setCacheBytes( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t Response::StoreStatData::Reader::getDiskBytes() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t Response::StoreStatData::Builder::getDiskBytes() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void Response::StoreStatData::Builder::setDiskBytes( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
 inline bool Response::KvPair::Reader::hasKey() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
@@ -5776,6 +5983,60 @@ inline ::capnp::Orphan< ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUC
   KJ_IREQUIRE((which() == Response::Result::PAIRS),
               "Must check which() before get()ing a union member.");
   return ::capnp::_::PointerHelpers< ::capnp::List< ::Response::KvPair,  ::capnp::Kind::STRUCT>>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool Response::Result::Reader::isStoreStats() const {
+  return which() == Response::Result::STORE_STATS;
+}
+inline bool Response::Result::Builder::isStoreStats() {
+  return which() == Response::Result::STORE_STATS;
+}
+inline bool Response::Result::Reader::hasStoreStats() const {
+  if (which() != Response::Result::STORE_STATS) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool Response::Result::Builder::hasStoreStats() {
+  if (which() != Response::Result::STORE_STATS) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Response::StoreStatData::Reader Response::Result::Reader::getStoreStats() const {
+  KJ_IREQUIRE((which() == Response::Result::STORE_STATS),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Response::StoreStatData>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::Response::StoreStatData::Builder Response::Result::Builder::getStoreStats() {
+  KJ_IREQUIRE((which() == Response::Result::STORE_STATS),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Response::StoreStatData>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void Response::Result::Builder::setStoreStats( ::Response::StoreStatData::Reader value) {
+  _builder.setDataField<Response::Result::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Response::Result::STORE_STATS);
+  ::capnp::_::PointerHelpers< ::Response::StoreStatData>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::Response::StoreStatData::Builder Response::Result::Builder::initStoreStats() {
+  _builder.setDataField<Response::Result::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Response::Result::STORE_STATS);
+  return ::capnp::_::PointerHelpers< ::Response::StoreStatData>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void Response::Result::Builder::adoptStoreStats(
+    ::capnp::Orphan< ::Response::StoreStatData>&& value) {
+  _builder.setDataField<Response::Result::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Response::Result::STORE_STATS);
+  ::capnp::_::PointerHelpers< ::Response::StoreStatData>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Response::StoreStatData> Response::Result::Builder::disownStoreStats() {
+  KJ_IREQUIRE((which() == Response::Result::STORE_STATS),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Response::StoreStatData>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 

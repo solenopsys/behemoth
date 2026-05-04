@@ -122,4 +122,10 @@ pub const KvEngine = struct {
         const stat = try file.stat();
         return stat.size;
     }
+
+    /// Returns bytes occupied by actual data in the mmap (used pages * page_size).
+    pub fn getCacheBytes(self: *KvEngine) u64 {
+        var db = self.db orelse return 0;
+        return db.usedBytes();
+    }
 };

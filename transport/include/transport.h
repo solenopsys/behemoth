@@ -35,7 +35,8 @@ typedef enum {
 
 TransportRequest* transport_req_ping(void);
 TransportRequest* transport_req_shutdown(void);
-TransportRequest* transport_req_open(const char* ms, const char* store, StoreTypeC store_type);
+TransportRequest* transport_req_create(const char* ms, const char* store, StoreTypeC store_type);
+TransportRequest* transport_req_open(const char* ms, const char* store);
 TransportRequest* transport_req_close(const char* ms, const char* store);
 TransportRequest* transport_req_exec_sql(const char* ms, const char* store, const char* sql);
 TransportRequest* transport_req_query_sql(const char* ms, const char* store, const char* sql);
@@ -170,6 +171,8 @@ typedef enum {
     REQ_DUMP_LIST   = 21,
     REQ_DUMP_DELETE = 22,
     REQ_DUMP_READ   = 23,
+    REQ_CREATE      = 24,
+    REQ_STATS       = 25,
 } RequestCmd;
 
 TransportRequestReader* transport_req_reader_decode(const uint8_t* buf, size_t len);
@@ -213,6 +216,11 @@ int32_t transport_encode_kv_pairs(uint8_t** out, size_t* out_len, TelemetryC tel
                                   const char** keys, const size_t* key_lens,
                                   const uint8_t** values, const size_t* value_lens,
                                   uint32_t count);
+int32_t transport_encode_store_stats(uint8_t** out, size_t* out_len, TelemetryC tel,
+                                     uint64_t cache_bytes, uint64_t disk_bytes);
+uint64_t transport_resp_stats_cache_bytes(TransportResponse* resp);
+uint64_t transport_resp_stats_disk_bytes(TransportResponse* resp);
+
 uint32_t       transport_resp_pair_count(TransportResponse* resp);
 const char*    transport_resp_pair_key_at(TransportResponse* resp, uint32_t i);
 const uint8_t* transport_resp_pair_value_ptr(TransportResponse* resp, uint32_t i);
