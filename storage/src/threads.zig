@@ -1,4 +1,5 @@
 const std = @import("std");
+const sync_compat = @import("sync_compat.zig");
 const Allocator = std.mem.Allocator;
 const manifest_mod = @import("manifest.zig");
 const StoreType = manifest_mod.StoreType;
@@ -15,7 +16,7 @@ pub const WorkItem = struct {
     op: Op,
     payload: []const u8,
     result: ?[]u8,
-    done: std.Thread.ResetEvent,
+    done: sync_compat.ResetEvent,
     err: ?anyerror,
     exec_ctx: ?*anyopaque = null,
     exec_fn: ?*const fn (?*anyopaque) void = null,
@@ -37,15 +38,15 @@ pub const StoreWorker = struct {
     thread: ?std.Thread,
     queue: std.ArrayList(*WorkItem),
     allocator: Allocator,
-    mutex: std.Thread.Mutex,
-    cond: std.Thread.Condition,
+    mutex: sync_compat.Mutex,
+    cond: sync_compat.Condition,
     running: bool,
     store_type: StoreType,
 
     pub fn init(allocator: Allocator, store_type: StoreType) StoreWorker {
         return .{
             .thread = null,
-            .queue = .{},
+            .queue = .empty,
             .allocator = allocator,
             .mutex = .{},
             .cond = .{},

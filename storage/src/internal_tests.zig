@@ -2,6 +2,8 @@ const std = @import("std");
 const commands_mod = @import("commands.zig");
 const manifest_mod = @import("manifest.zig");
 const telemetry_mod = @import("telemetry.zig");
+const sync_compat = @import("sync_compat.zig");
+const fs_compat = @import("fs_compat.zig");
 const threads_mod = @import("threads.zig");
 
 const StorageCommands = commands_mod.StorageCommands;
@@ -29,7 +31,7 @@ const FilesCtx = struct {
 
 const BlockCtx = struct {
     entered: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    release: std.Thread.ResetEvent = .{},
+    release: sync_compat.ResetEvent = .{},
 };
 
 const MarkerCtx = struct {
@@ -48,11 +50,13 @@ fn markExec(ctx_ptr: ?*anyopaque) void {
 }
 
 fn prepareDataDir(tmp: *std.testing.TmpDir, path_buf: []u8) ![]const u8 {
-    try tmp.dir.makeDir("data");
-    return tmp.dir.realpath("data", path_buf);
+    try tmp.dir.createDir(std.testing.io, "data", .default_dir);
+    const len = try tmp.dir.realPathFile(std.testing.io, "data", path_buf);
+    return path_buf[0..len];
 }
 
 test "open is idempotent and store can close/reopen" {
+    fs_compat.setIo(std.testing.io);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -84,6 +88,7 @@ test "open is idempotent and store can close/reopen" {
 }
 
 test "error in one store type does not break others" {
+    fs_compat.setIo(std.testing.io);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -209,12 +214,12 @@ fn filesWorker(ctx: *FilesCtx) void {
 }
 
 test "store controllers process sql/kv/vector/files independently across threads" {
+    fs_compat.setIo(std.testing.io);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makeDir("data");
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const data_dir = try tmp.dir.realpath("data", &path_buf);
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
 
     var commands = StorageCommands.init(std.testing.allocator, data_dir);
     defer commands.deinit();
@@ -234,8 +239,8 @@ test "store controllers process sql/kv/vector/files independently across threads
     var kv_ctx = KvCtx{ .commands = &commands, .failed = &failed };
     var files_ctx = FilesCtx{ .commands = &commands, .failed = &failed };
 
-    const sql_thread = try std.Thread.spawn(.{}, sqlWorker, .{"sql-ms/sql", "t_sql", &sql_ctx});
-    const vec_thread = try std.Thread.spawn(.{}, sqlWorker, .{"vec-ms/vec", "t_vec", &vec_ctx});
+    const sql_thread = try std.Thread.spawn(.{}, sqlWorker, .{ "sql-ms/sql", "t_sql", &sql_ctx });
+    const vec_thread = try std.Thread.spawn(.{}, sqlWorker, .{ "vec-ms/vec", "t_vec", &vec_ctx });
     const kv_thread = try std.Thread.spawn(.{}, kvWorker, .{&kv_ctx});
     const files_thread = try std.Thread.spawn(.{}, filesWorker, .{&files_ctx});
 
@@ -257,6 +262,7 @@ test "store controllers process sql/kv/vector/files independently across threads
 }
 
 test "thread pool keeps store-type workers isolated" {
+    fs_compat.setIo(std.testing.io);
     var pool = ThreadPool.init(std.testing.allocator);
     defer pool.deinit();
     try pool.start();
@@ -278,7 +284,7 @@ test "thread pool keeps store-type workers isolated" {
     const enter_deadline_ms = 500;
     var waited_ms: usize = 0;
     while (!blocker.entered.load(.seq_cst) and waited_ms < enter_deadline_ms) : (waited_ms += 1) {
-        std.Thread.sleep(std.time.ns_per_ms);
+        sync_compat.sleep(std.time.ns_per_ms);
     }
     try std.testing.expect(blocker.entered.load(.seq_cst));
 

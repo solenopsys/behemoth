@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("fs_compat.zig");
 const Allocator = std.mem.Allocator;
 
 pub const StoreType = enum {
@@ -43,7 +44,7 @@ pub const Manifest = struct {
             .name = try allocator.dupe(u8, name),
             .version = try allocator.dupe(u8, "1"),
             .store_type = store_type,
-            .migrations = .{},
+            .migrations = .empty,
             .allocator = allocator,
         };
     }
@@ -68,7 +69,7 @@ pub const Manifest = struct {
 
     /// Load manifest from JSON file
     pub fn load(allocator: Allocator, path: []const u8) !Manifest {
-        const file = try std.fs.cwd().openFile(path, .{});
+        const file = try fs_compat.cwd().openFile(path, .{});
         defer file.close();
 
         const content = try file.readToEndAlloc(allocator, 1024 * 1024);
@@ -84,7 +85,7 @@ pub const Manifest = struct {
         const type_str = if (obj.get("type")) |v| v.string else "SQL";
         const store_type = StoreType.fromString(type_str) orelse .sql;
 
-        var migrations: std.ArrayList([]const u8) = .{};
+        var migrations: std.ArrayList([]const u8) = .empty;
         if (obj.get("migrations")) |migs| {
             if (migs == .array) {
                 for (migs.array.items) |item| {
@@ -106,7 +107,7 @@ pub const Manifest = struct {
 
     /// Save manifest as JSON file
     pub fn save(self: *const Manifest, path: []const u8) !void {
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\n");
@@ -121,7 +122,7 @@ pub const Manifest = struct {
         }
         try buf.appendSlice(self.allocator, "]\n}\n");
 
-        const file = try std.fs.cwd().createFile(path, .{});
+        const file = try fs_compat.cwd().createFile(path, .{});
         defer file.close();
         try file.writeAll(buf.items);
     }
@@ -137,7 +138,7 @@ pub fn ensureManifest(allocator: Allocator, dir_path: []const u8, name: []const 
         return manifest;
     } else |_| {
         // Create new
-        std.fs.cwd().makePath(dir_path) catch {};
+        fs_compat.cwd().makePath(dir_path) catch {};
         var manifest = try Manifest.init(allocator, name, store_type);
         try manifest.save(manifest_path);
         return manifest;

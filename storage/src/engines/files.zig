@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("../fs_compat.zig");
 const Allocator = std.mem.Allocator;
 const Telemetry = @import("../telemetry.zig").Telemetry;
 
@@ -14,7 +15,7 @@ pub const FilesEngine = struct {
     }
 
     pub fn open(self: *FilesEngine) !void {
-        try std.fs.cwd().makePath(self.base_path);
+        try fs_compat.cwd().makePath(self.base_path);
     }
 
     pub fn close(self: *FilesEngine) void {
@@ -27,10 +28,10 @@ pub const FilesEngine = struct {
 
         // Ensure parent dir exists
         if (std.mem.lastIndexOfScalar(u8, full_path, '/')) |idx| {
-            try std.fs.cwd().makePath(full_path[0..idx]);
+            try fs_compat.cwd().makePath(full_path[0..idx]);
         }
 
-        const file = try std.fs.cwd().createFile(full_path, .{});
+        const file = try fs_compat.cwd().createFile(full_path, .{});
         defer file.close();
         try file.writeAll(data);
 
@@ -41,7 +42,7 @@ pub const FilesEngine = struct {
         const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.base_path, key });
         defer self.allocator.free(full_path);
 
-        const file = std.fs.cwd().openFile(full_path, .{}) catch |err| blk: {
+        const file = fs_compat.cwd().openFile(full_path, .{}) catch |err| blk: {
             if (err != error.FileNotFound) return err;
 
             // Backward compatibility: some stores may still keep files directly
@@ -50,7 +51,7 @@ pub const FilesEngine = struct {
             const legacy_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ parent, key });
             defer self.allocator.free(legacy_path);
 
-            const legacy_file = std.fs.cwd().openFile(legacy_path, .{}) catch |legacy_err| {
+            const legacy_file = fs_compat.cwd().openFile(legacy_path, .{}) catch |legacy_err| {
                 if (legacy_err == error.FileNotFound) return null;
                 return legacy_err;
             };
@@ -67,7 +68,7 @@ pub const FilesEngine = struct {
         const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.base_path, key });
         defer self.allocator.free(full_path);
 
-        std.fs.cwd().deleteFile(full_path) catch |err| {
+        fs_compat.cwd().deleteFile(full_path) catch |err| {
             if (err == error.FileNotFound) return false;
             return err;
         };
@@ -79,14 +80,14 @@ pub const FilesEngine = struct {
         const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.base_path, key });
         defer self.allocator.free(full_path);
 
-        std.fs.cwd().access(full_path, .{}) catch return false;
+        fs_compat.cwd().access(full_path, .{}) catch return false;
         return true;
     }
 
     /// Get total size of all files
     pub fn getSize(self: *FilesEngine) !u64 {
         var total: u64 = 0;
-        var dir = std.fs.cwd().openDir(self.base_path, .{ .iterate = true }) catch return 0;
+        var dir = fs_compat.cwd().openDir(self.base_path, .{ .iterate = true }) catch return 0;
         defer dir.close();
 
         var walker = try dir.walk(self.allocator);
@@ -103,13 +104,15 @@ pub const FilesEngine = struct {
 
     /// List all keys as JSON array
     pub fn listKeysJson(self: *FilesEngine, tel: *Telemetry) ![]u8 {
-        var result: std.ArrayList(u8) = .{};
+        var result: std.ArrayList(u8) = .empty;
         errdefer result.deinit(self.allocator);
-        const writer = result.writer(self.allocator);
+        var aw: std.Io.Writer.Allocating = .fromArrayList(self.allocator, &result);
+        const writer = &aw.writer;
         try writer.writeByte('[');
 
-        var dir = std.fs.cwd().openDir(self.base_path, .{ .iterate = true }) catch {
+        var dir = fs_compat.cwd().openDir(self.base_path, .{ .iterate = true }) catch {
             try writer.writeByte(']');
+            result = aw.toArrayList();
             return result.toOwnedSlice(self.allocator);
         };
         defer dir.close();
@@ -130,6 +133,7 @@ pub const FilesEngine = struct {
 
         try writer.writeByte(']');
         tel.addRead(result.items.len);
+        result = aw.toArrayList();
         return result.toOwnedSlice(self.allocator);
     }
 };

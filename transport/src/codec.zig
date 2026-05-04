@@ -1,4 +1,5 @@
 const std = @import("std");
+const posix_compat = @import("posix_compat.zig");
 
 // Message framing: 4-byte little-endian length prefix + raw body.
 // Body will be Cap'n Proto bytes once the codec is wired in.
@@ -30,7 +31,7 @@ pub fn recvMessage(fd: std.posix.fd_t, allocator: std.mem.Allocator) ![]u8 {
 fn writeAll(fd: std.posix.fd_t, data: []const u8) !void {
     var sent: usize = 0;
     while (sent < data.len) {
-        const n = try std.posix.write(fd, data[sent..]);
+        const n = try posix_compat.write(fd, data[sent..]);
         if (n == 0) return error.BrokenPipe;
         sent += n;
     }

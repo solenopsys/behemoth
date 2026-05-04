@@ -98,24 +98,24 @@ fn addTransportLib(
 
     // vendored kj sources
     for (kj_sources) |src| {
-        lib.addCSourceFile(.{ .file = b.path(src), .flags = vendor_flags });
+        lib.root_module.addCSourceFile(.{ .file = b.path(src), .flags = vendor_flags });
     }
 
     // vendored capnp sources
     for (capnp_sources) |src| {
-        lib.addCSourceFile(.{ .file = b.path(src), .flags = vendor_flags });
+        lib.root_module.addCSourceFile(.{ .file = b.path(src), .flags = vendor_flags });
     }
 
     // transport application sources
-    lib.addCSourceFile(.{ .file = b.path("src/generated/wire.capnp.cpp"), .flags = api_flags });
-    lib.addCSourceFile(.{ .file = b.path("src/capnp_wrap.cpp"), .flags = api_flags });
+    lib.root_module.addCSourceFile(.{ .file = b.path("src/generated/wire.capnp.cpp"), .flags = api_flags });
+    lib.root_module.addCSourceFile(.{ .file = b.path("src/capnp_wrap.cpp"), .flags = api_flags });
 
-    lib.addIncludePath(b.path("include"));
-    lib.addIncludePath(b.path("src/generated"));
-    lib.addIncludePath(b.path(vendor_src));
+    lib.root_module.addIncludePath(b.path("include"));
+    lib.root_module.addIncludePath(b.path("src/generated"));
+    lib.root_module.addIncludePath(b.path(vendor_src));
 
-    lib.linkLibCpp();
-    lib.linkLibC();
+    lib.root_module.linkSystemLibrary("c++", .{});
+    lib.root_module.linkSystemLibrary("c", .{});
 
     return lib;
 }

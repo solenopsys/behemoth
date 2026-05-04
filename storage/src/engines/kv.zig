@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("../fs_compat.zig");
 const Allocator = std.mem.Allocator;
 const lmdbx = @import("lmdbx");
 const Telemetry = @import("../telemetry.zig").Telemetry;
@@ -81,7 +82,7 @@ pub const KvEngine = struct {
         var cursor = try db.openCursor();
         defer lmdbx.Database.closeCursor(cursor);
 
-        var pairs: std.ArrayList(Pair) = .{};
+        var pairs: std.ArrayList(Pair) = .empty;
         errdefer {
             for (pairs.items) |p| {
                 self.allocator.free(p.key);
@@ -116,7 +117,7 @@ pub const KvEngine = struct {
     }
 
     pub fn getSize(self: *KvEngine) !u64 {
-        const file = try std.fs.cwd().openFile(self.path, .{});
+        const file = try fs_compat.cwd().openFile(self.path, .{});
         defer file.close();
         const stat = try file.stat();
         return stat.size;

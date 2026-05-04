@@ -1,9 +1,10 @@
 const std = @import("std");
+const posix_compat = @import("posix_compat.zig");
 
 const default_timeout_ms: u32 = 5_000;
 
 fn getOperationTimeoutMs() u32 {
-    const raw = std.posix.getenv("TRANSPORT_OP_TIMEOUT_MS") orelse return default_timeout_ms;
+    const raw = posix_compat.getenv("TRANSPORT_OP_TIMEOUT_MS") orelse return default_timeout_ms;
     const parsed = std.fmt.parseUnsigned(u32, raw, 10) catch return default_timeout_ms;
     return parsed;
 }
@@ -27,17 +28,17 @@ pub fn setOperationTimeout(fd: std.posix.fd_t, timeout_ms: u32) !void {
 pub fn listen(path: [*:0]const u8) !std.posix.fd_t {
     const path_slice = std.mem.span(path);
 
-    std.posix.unlink(path_slice) catch |err| switch (err) {
+    posix_compat.unlink(path_slice) catch |err| switch (err) {
         error.FileNotFound => {},
         else => return err,
     };
 
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.UNIX,
         std.posix.SOCK.STREAM,
         0,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
 
     var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
     addr.family = std.posix.AF.UNIX;
@@ -45,8 +46,8 @@ pub fn listen(path: [*:0]const u8) !std.posix.fd_t {
     @memcpy(addr.path[0..path_slice.len], path_slice);
     addr.path[path_slice.len] = 0;
 
-    try std.posix.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
-    try std.posix.listen(fd, 128);
+    try posix_compat.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
+    try posix_compat.listen(fd, 128);
 
     return fd;
 }
@@ -56,12 +57,12 @@ pub fn listen(path: [*:0]const u8) !std.posix.fd_t {
 pub fn connect(path: [*:0]const u8) !std.posix.fd_t {
     const path_slice = std.mem.span(path);
 
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.UNIX,
         std.posix.SOCK.STREAM,
         0,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
 
     var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
     addr.family = std.posix.AF.UNIX;
@@ -69,7 +70,7 @@ pub fn connect(path: [*:0]const u8) !std.posix.fd_t {
     @memcpy(addr.path[0..path_slice.len], path_slice);
     addr.path[path_slice.len] = 0;
 
-    try std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
+    try posix_compat.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
     try setOperationTimeout(fd, getOperationTimeoutMs());
 
     return fd;
@@ -81,12 +82,12 @@ pub fn connect(path: [*:0]const u8) !std.posix.fd_t {
 /// Pass host = "0.0.0.0" to listen on all interfaces.
 /// Returns the server fd.
 pub fn listenTcp(host: [*:0]const u8, port: u16) !std.posix.fd_t {
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.INET,
         std.posix.SOCK.STREAM,
         std.posix.IPPROTO.TCP,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
 
     // SO_REUSEADDR so the port is reusable immediately after restart
     const one: c_int = 1;
@@ -97,9 +98,9 @@ pub fn listenTcp(host: [*:0]const u8, port: u16) !std.posix.fd_t {
         std.mem.asBytes(&one),
     );
 
-    const ip4 = try std.net.Address.parseIp4(std.mem.span(host), port);
-    try std.posix.bind(fd, &ip4.any, ip4.getOsSockLen());
-    try std.posix.listen(fd, 128);
+    const ip4 = try posix_compat.parseIp4Address(std.mem.span(host), port);
+    try posix_compat.bind(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
+    try posix_compat.listen(fd, 128);
 
     return fd;
 }
@@ -107,15 +108,15 @@ pub fn listenTcp(host: [*:0]const u8, port: u16) !std.posix.fd_t {
 /// Connect to a TCP server at host:port.
 /// Returns the connected fd.
 pub fn connectTcp(host: [*:0]const u8, port: u16) !std.posix.fd_t {
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.INET,
         std.posix.SOCK.STREAM,
         std.posix.IPPROTO.TCP,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
 
-    const ip4 = try std.net.Address.parseIp4(std.mem.span(host), port);
-    try std.posix.connect(fd, &ip4.any, ip4.getOsSockLen());
+    const ip4 = try posix_compat.parseIp4Address(std.mem.span(host), port);
+    try posix_compat.connect(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
     try setOperationTimeout(fd, getOperationTimeoutMs());
 
     return fd;

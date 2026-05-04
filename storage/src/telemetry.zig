@@ -1,5 +1,11 @@
 const std = @import("std");
 
+fn nanoTimestamp() i128 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.MONOTONIC, &ts);
+    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
+}
+
 pub const Telemetry = struct {
     start_ns: i128,
     op_count: u64,
@@ -8,7 +14,7 @@ pub const Telemetry = struct {
 
     pub fn begin() Telemetry {
         return .{
-            .start_ns = std.time.nanoTimestamp(),
+            .start_ns = nanoTimestamp(),
             .op_count = 0,
             .bytes_read = 0,
             .bytes_written = 0,
@@ -26,7 +32,7 @@ pub const Telemetry = struct {
     }
 
     pub fn elapsedUs(self: *const Telemetry) i64 {
-        const now = std.time.nanoTimestamp();
+        const now = nanoTimestamp();
         return @intCast(@divFloor(now - self.start_ns, 1000));
     }
 

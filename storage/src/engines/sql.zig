@@ -1,4 +1,5 @@
 const std = @import("std");
+const fs_compat = @import("../fs_compat.zig");
 const Allocator = std.mem.Allocator;
 const Telemetry = @import("../telemetry.zig").Telemetry;
 
@@ -60,9 +61,10 @@ pub const SqlEngine = struct {
         if (rc != c.SQLITE_OK) return error.SqlitePrepareFailed;
         defer _ = c.sqlite3_finalize(stmt);
 
-        var result: std.ArrayList(u8) = .{};
+        var result: std.ArrayList(u8) = .empty;
         errdefer result.deinit(allocator);
-        const writer = result.writer(allocator);
+        var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &result);
+        const writer = &aw.writer;
 
         try writer.writeByte('[');
         var row_idx: usize = 0;
@@ -121,11 +123,12 @@ pub const SqlEngine = struct {
         tel.bytes_read += result.items.len;
         tel.op_count += 1;
 
+        result = aw.toArrayList();
         return result.toOwnedSlice(allocator);
     }
 
     pub fn getSize(self: *SqlEngine) !u64 {
-        const file = try std.fs.cwd().openFile(self.path, .{});
+        const file = try fs_compat.cwd().openFile(self.path, .{});
         defer file.close();
         const stat = try file.stat();
         return stat.size;

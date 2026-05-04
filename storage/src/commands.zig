@@ -1,4 +1,6 @@
 const std = @import("std");
+const fs_compat = @import("fs_compat.zig");
+const sync_compat = @import("sync_compat.zig");
 const Allocator = std.mem.Allocator;
 const manifest_mod = @import("manifest.zig");
 const Manifest = manifest_mod.Manifest;
@@ -11,6 +13,18 @@ const ColumnEngine = @import("engines/column.zig").ColumnEngine;
 const VectorEngine = @import("engines/vector.zig").VectorEngine;
 const FilesEngine = @import("engines/files.zig").FilesEngine;
 const GraphEngine = @import("engines/graph.zig").GraphEngine;
+
+fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    return @intCast(ts.sec * 1000 + @divTrunc(ts.nsec, std.time.ns_per_ms));
+}
+
+fn unixTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    return @intCast(ts.sec);
+}
 
 pub const StoreHandle = union(StoreType) {
     sql: SqlEngine,
@@ -27,7 +41,7 @@ pub const StoreInstance = struct {
     manifest_path: []const u8,
     data_path_z: ?[:0]u8,
     store_dir: []const u8,
-    rwlock: std.Thread.RwLock = .{},
+    rwlock: sync_compat.RwLock = .{},
 };
 
 pub const DumpEntry = struct {
@@ -63,7 +77,7 @@ fn writeTarEntry(writer: anytype, name: []const u8, data: []const u8) !void {
     _ = std.fmt.bufPrint(header[116..124], "0000000\x00", .{}) catch {};
     _ = std.fmt.bufPrint(header[124..136], "{o:0>11}\x00", .{data.len}) catch {};
 
-    const mtime: u64 = @intCast(std.time.timestamp());
+    const mtime: u64 = @intCast(unixTimestamp());
     _ = std.fmt.bufPrint(header[136..148], "{o:0>11}\x00", .{mtime}) catch {};
 
     @memset(header[148..156], ' ');
@@ -93,48 +107,42 @@ fn writeTarEnd(writer: anytype) !void {
 
 const GzipWriter = struct {
     const Flate = std.compress.flate;
-    const Crc32 = std.hash.Crc32;
 
-    file: std.fs.File,
+    file: fs_compat.File,
+    file_writer: std.Io.File.Writer,
     compressor: Flate.Compress,
-    crc: Crc32,
-    total_in: u32,
     file_buf: [4096]u8,
-    comp_buf: [8192]u8,
+    comp_buf: [Flate.max_window_len]u8,
 
-    fn initGzip(file: std.fs.File) !GzipWriter {
-        const gzip_header = [_]u8{ 0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff };
-        try file.writeAll(&gzip_header);
-        var w = GzipWriter{
+    fn initGzip(self: *GzipWriter, file: fs_compat.File) !void {
+        self.* = .{
             .file = file,
+            .file_writer = undefined,
             .compressor = undefined,
-            .crc = Crc32.init(),
-            .total_in = 0,
             .file_buf = undefined,
             .comp_buf = undefined,
         };
-        var fwriter = file.writer(&w.file_buf);
-        w.compressor = Flate.Compress.init(&fwriter.interface, &w.comp_buf, .{ .container = .raw });
-        return w;
+        self.file_writer = file.writer(&self.file_buf);
+        self.compressor = try Flate.Compress.init(
+            &self.file_writer.interface,
+            &self.comp_buf,
+            .gzip,
+            .default,
+        );
     }
 
     fn writeAll(self: *GzipWriter, data: []const u8) !void {
-        self.crc.update(data);
-        self.total_in +%= @truncate(data.len);
         try self.compressor.writer.writeAll(data);
     }
 
     fn finishGzip(self: *GzipWriter) !void {
-        try self.compressor.end();
-        var footer: [8]u8 = undefined;
-        std.mem.writeInt(u32, footer[0..4], self.crc.final(), .little);
-        std.mem.writeInt(u32, footer[4..8], self.total_in, .little);
-        try self.file.writeAll(&footer);
+        try self.compressor.finish();
+        try self.file_writer.interface.flush();
     }
 };
 
 const FileWriter = struct {
-    file: std.fs.File,
+    file: fs_compat.File,
 
     pub fn writeAll(self: *FileWriter, data: []const u8) !void {
         try self.file.writeAll(data);
@@ -195,7 +203,7 @@ pub const StorageCommands = struct {
         const data_dir = try std.fmt.allocPrint(self.allocator, "{s}/data", .{store_dir});
         defer self.allocator.free(data_dir);
 
-        try std.fs.cwd().makePath(data_dir);
+        try fs_compat.cwd().makePath(data_dir);
 
         const mfst = try manifest_mod.ensureManifest(self.allocator, store_dir, store_name, store_type);
         errdefer {
@@ -398,7 +406,7 @@ pub const StorageCommands = struct {
         const data_path = try std.fmt.allocPrint(self.allocator, "{s}/data", .{inst.store_dir});
         defer self.allocator.free(data_path);
 
-        var dir = std.fs.cwd().openDir(data_path, .{ .iterate = true }) catch return 0;
+        var dir = fs_compat.cwd().openDir(data_path, .{ .iterate = true }) catch return 0;
         defer dir.close();
 
         var total: u64 = 0;
@@ -424,8 +432,7 @@ pub const StorageCommands = struct {
     pub fn createArchive(self: *StorageCommands, store_key: []const u8, output_path: []const u8) !void {
         const inst = self.stores.getPtr(store_key) orelse return error.StoreNotFound;
 
-        const result = try std.process.Child.run(.{
-            .allocator = self.allocator,
+        const result = try std.process.run(self.allocator, fs_compat.getIo(), .{
             .argv = &[_][]const u8{ "tar", "czf", output_path, "-C", inst.store_dir, "." },
         });
         self.allocator.free(result.stdout);
@@ -440,9 +447,9 @@ pub const StorageCommands = struct {
 
         const dumps_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/dumps", .{self.data_dir});
         defer self.allocator.free(dumps_dir_path);
-        try std.fs.cwd().makePath(dumps_dir_path);
+        try fs_compat.cwd().makePath(dumps_dir_path);
 
-        const ts = std.time.milliTimestamp();
+        const ts = milliTimestamp();
         const safe_ms = try sanitizeNameAlloc(self.allocator, ms_name);
         defer self.allocator.free(safe_ms);
         const safe_store = try sanitizeNameAlloc(self.allocator, store_name);
@@ -454,12 +461,13 @@ pub const StorageCommands = struct {
         const output_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ dumps_dir_path, file_name });
         defer self.allocator.free(output_path);
 
-        const out_file = try std.fs.cwd().createFile(output_path, .{});
+        const out_file = try fs_compat.cwd().createFile(output_path, .{});
         defer out_file.close();
 
-        var gz = try GzipWriter.initGzip(out_file);
+        var gz: GzipWriter = undefined;
+        try gz.initGzip(out_file);
 
-        var data_dir = std.fs.cwd().openDir(data_path, .{ .iterate = true }) catch {
+        var data_dir = fs_compat.cwd().openDir(data_path, .{ .iterate = true }) catch {
             gz.finishGzip() catch {};
             return file_name;
         };
@@ -485,13 +493,13 @@ pub const StorageCommands = struct {
         const dumps_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/dumps", .{self.data_dir});
         defer self.allocator.free(dumps_dir_path);
 
-        var dir = std.fs.cwd().openDir(dumps_dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        var dir = fs_compat.cwd().openDir(dumps_dir_path, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound => return self.allocator.alloc(DumpEntry, 0),
             else => return err,
         };
         defer dir.close();
 
-        var entries: std.ArrayList(DumpEntry) = .{};
+        var entries: std.ArrayList(DumpEntry) = .empty;
         errdefer {
             for (entries.items) |e| self.allocator.free(e.name);
             entries.deinit(self.allocator);
@@ -512,7 +520,7 @@ pub const StorageCommands = struct {
         if (!isSafeFileName(file_name)) return error.InvalidName;
         const path = try std.fmt.allocPrint(self.allocator, "{s}/dumps/{s}", .{ self.data_dir, file_name });
         defer self.allocator.free(path);
-        try std.fs.cwd().deleteFile(path);
+        try fs_compat.cwd().deleteFile(path);
     }
 
     pub fn readDump(self: *StorageCommands, file_name: []const u8, offset: u64, length: u32) ![]u8 {
@@ -520,7 +528,7 @@ pub const StorageCommands = struct {
         const path = try std.fmt.allocPrint(self.allocator, "{s}/dumps/{s}", .{ self.data_dir, file_name });
         defer self.allocator.free(path);
 
-        const file = try std.fs.cwd().openFile(path, .{});
+        const file = try fs_compat.cwd().openFile(path, .{});
         defer file.close();
 
         try file.seekTo(offset);

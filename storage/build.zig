@@ -100,21 +100,21 @@ fn buildMdbx(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMode) *B
     else
         &base_flags;
 
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/lmdbx/vendor/libmdbx/src/alloy.c"),
         .flags = flags,
     });
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/lmdbx/version.c"),
         .flags = flags,
     });
-    mdbx.addCSourceFile(.{
+    mdbx.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/lmdbx/cpu_stub.c"),
         .flags = &[_][]const u8{"-fPIC"},
     });
-    mdbx.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx"));
-    mdbx.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx/src"));
-    mdbx.linkLibC();
+    mdbx.root_module.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx"));
+    mdbx.root_module.addIncludePath(b.path("../../wrapers/lmdbx/vendor/libmdbx/src"));
+    mdbx.root_module.linkSystemLibrary("c", .{});
 
     return mdbx;
 }
@@ -149,13 +149,13 @@ fn addSqliteVecObj(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMo
     else
         &base_flags;
 
-    vec.addCSourceFile(.{
+    vec.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec/sqlite-vec.c"),
         .flags = flags,
     });
-    vec.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
-    vec.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec/vendor"));
-    vec.linkLibC();
+    vec.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
+    vec.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec/vendor"));
+    vec.root_module.linkSystemLibrary("c", .{});
 
     return vec;
 }
@@ -173,7 +173,7 @@ fn buildSqlite3(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMode)
         }),
     });
 
-    sqlite.addCSourceFile(.{
+    sqlite.root_module.addCSourceFile(.{
         .file = b.path(sqlite_src),
         .flags = &[_][]const u8{
             "-std=c99",
@@ -181,8 +181,8 @@ fn buildSqlite3(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMode)
             "-fPIC",
         },
     });
-    sqlite.addIncludePath(b.path(sqlite_dir));
-    sqlite.linkLibC();
+    sqlite.root_module.addIncludePath(b.path(sqlite_dir));
+    sqlite.root_module.linkSystemLibrary("c", .{});
 
     return sqlite;
 }
@@ -211,14 +211,14 @@ fn addStorageExecutable(
     exe_options.addOption(bool, "with_transport", with_transport);
     exe.root_module.addOptions("build_options", exe_options);
 
-    exe.linkLibrary(mdbx);
-    exe.linkLibrary(sqlite3);
-    exe.addObject(sqlite_vec);
+    exe.root_module.linkLibrary(mdbx);
+    exe.root_module.linkLibrary(sqlite3);
+    exe.root_module.addObject(sqlite_vec);
 
     // sqlite-vec header for VectorEngine to call sqlite3_vec_init
     exe.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
 
-    exe.addCSourceFile(.{
+    exe.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/column/src/sqlite3/c/result-transient.c"),
         .flags = &[_][]const u8{"-std=c99"},
     });
@@ -267,33 +267,39 @@ fn addStorageExecutable(
         };
 
         for (kj_sources) |src| {
-            exe.addCSourceFile(.{ .file = b.path(src), .flags = cpp_flags });
+            exe.root_module.addCSourceFile(.{ .file = b.path(src), .flags = cpp_flags });
         }
         for (capnp_sources) |src| {
-            exe.addCSourceFile(.{ .file = b.path(src), .flags = cpp_flags });
+            exe.root_module.addCSourceFile(.{ .file = b.path(src), .flags = cpp_flags });
         }
 
-        exe.addCSourceFile(.{
+        exe.root_module.addCSourceFile(.{
             .file = b.path("../transport/src/generated/wire.capnp.cpp"),
             .flags = cpp_flags,
         });
-        exe.addCSourceFile(.{
+        exe.root_module.addCSourceFile(.{
             .file = b.path("../transport/src/capnp_wrap.cpp"),
             .flags = cpp_flags,
         });
-        exe.addIncludePath(b.path("../transport/include"));
-        exe.addIncludePath(b.path("../transport/src/generated"));
-        exe.addIncludePath(b.path(transport_vendor_src));
-        exe.linkLibCpp();
+        exe.root_module.addIncludePath(b.path("../transport/include"));
+        exe.root_module.addIncludePath(b.path("../transport/src/generated"));
+        exe.root_module.addIncludePath(b.path(transport_vendor_src));
+        exe.root_module.linkSystemLibrary("c++", .{});
     }
 
-    exe.linkLibC();
+    exe.root_module.linkSystemLibrary("c", .{});
 
     return exe;
 }
 
 pub fn build(b: *Build) void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_arch = .x86_64,
+            .os_tag = .linux,
+            .abi = .musl,
+        },
+    });
     const optimize = b.standardOptimizeOption(.{});
     const build_all = b.option(bool, "all", "Build for all supported targets") orelse false;
     const transport_override = b.option(bool, "transport", "Enable Cap'n Proto transport/server support");
@@ -330,14 +336,14 @@ pub fn build(b: *Build) void {
     tests_options.addOption(bool, "with_transport", false);
     tests.root_module.addOptions("build_options", tests_options);
 
-    tests.linkLibrary(mdbx);
-    tests.linkLibrary(sqlite3);
-    tests.addObject(sqlite_vec);
+    tests.root_module.linkLibrary(mdbx);
+    tests.root_module.linkLibrary(sqlite3);
+    tests.root_module.addObject(sqlite_vec);
 
     // sqlite-vec header for VectorEngine
     tests.root_module.addIncludePath(b.path("../../wrapers/sqlite-vec/vendor/sqlite-vec"));
 
-    tests.addCSourceFile(.{
+    tests.root_module.addCSourceFile(.{
         .file = b.path("../../wrapers/column/src/sqlite3/c/result-transient.c"),
         .flags = &[_][]const u8{"-std=c99"},
     });
@@ -358,7 +364,7 @@ pub fn build(b: *Build) void {
         .target = target,
         .optimize = optimize,
     }));
-    tests.linkLibC();
+    tests.root_module.linkSystemLibrary("c", .{});
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");

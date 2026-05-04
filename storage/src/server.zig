@@ -1,4 +1,7 @@
 const std = @import("std");
+const posix_compat = @import("posix_compat.zig");
+const fs_compat = @import("fs_compat.zig");
+const sync_compat = @import("sync_compat.zig");
 const cmds = @import("commands.zig");
 const mfst = @import("manifest.zig");
 const tel_mod = @import("telemetry.zig");
@@ -20,7 +23,7 @@ const max_msg: u32 = 64 * 1024 * 1024;
 
 var shutdown_requested = std.atomic.Value(bool).init(false);
 var active_clients = std.atomic.Value(usize).init(0);
-var stores_rwlock: std.Thread.RwLock = .{};
+var stores_rwlock: sync_compat.RwLock = .{};
 var pool: ThreadPool = undefined;
 
 const ClientContext = struct {
@@ -37,57 +40,57 @@ pub const BindConfig = union(enum) {
 
 fn createUnixServer(socket_path: []const u8) !std.posix.fd_t {
     try ensureSocketParent(socket_path);
-    std.posix.unlink(socket_path) catch |err| switch (err) {
+    posix_compat.unlink(socket_path) catch |err| switch (err) {
         error.FileNotFound => {},
         else => return err,
     };
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.UNIX,
         std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
         0,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
     var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
     addr.family = std.posix.AF.UNIX;
     if (socket_path.len + 1 > addr.path.len) return error.SocketPathTooLong;
     @memcpy(addr.path[0..socket_path.len], socket_path);
     addr.path[socket_path.len] = 0;
-    try std.posix.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
-    try std.posix.listen(fd, 128);
+    try posix_compat.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
+    try posix_compat.listen(fd, 128);
     return fd;
 }
 
 fn createTcpServer(host: []const u8, port: u16) !std.posix.fd_t {
-    const fd = try std.posix.socket(
+    const fd = try posix_compat.socket(
         std.posix.AF.INET,
         std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
         std.posix.IPPROTO.TCP,
     );
-    errdefer std.posix.close(fd);
+    errdefer posix_compat.close(fd);
     const one: c_int = 1;
     try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&one));
-    const ip4 = try std.net.Address.parseIp4(host, port);
-    try std.posix.bind(fd, &ip4.any, ip4.getOsSockLen());
-    try std.posix.listen(fd, 128);
+    const ip4 = try posix_compat.parseIp4Address(host, port);
+    try posix_compat.bind(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
+    try posix_compat.listen(fd, 128);
     return fd;
 }
 
 pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void {
-    try std.fs.cwd().makePath(data_dir);
+    try fs_compat.cwd().makePath(data_dir);
     installSignalHandlers();
     shutdown_requested.store(false, .seq_cst);
 
     const server_fd: std.posix.fd_t = switch (cfg) {
         .unix => |path| try createUnixServer(path),
-        .tcp  => |t|    try createTcpServer(t.host, t.port),
+        .tcp => |t| try createTcpServer(t.host, t.port),
     };
-    defer std.posix.close(server_fd);
+    defer posix_compat.close(server_fd);
     // Remove unix socket file on exit; nothing to clean up for TCP.
     const unix_path: ?[]const u8 = switch (cfg) {
         .unix => |p| p,
-        .tcp  => null,
+        .tcp => null,
     };
-    defer if (unix_path) |p| std.posix.unlink(p) catch {};
+    defer if (unix_path) |p| posix_compat.unlink(p) catch {};
 
     var commands = StorageCommands.init(allocator, data_dir);
     defer commands.deinit();
@@ -102,7 +105,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
 
     switch (cfg) {
         .unix => |path| std.debug.print("storage server listening on unix:{s}\n", .{path}),
-        .tcp  => |t|    std.debug.print("storage server listening on tcp:{s}:{d}\n", .{ t.host, t.port }),
+        .tcp => |t| std.debug.print("storage server listening on tcp:{s}:{d}\n", .{ t.host, t.port }),
     }
 
     active_clients.store(0, .seq_cst);
@@ -113,9 +116,9 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
             break;
         }
 
-        const client_fd = std.posix.accept(server_fd, null, null, 0) catch |err| switch (err) {
+        const client_fd = posix_compat.accept(server_fd, null, null, 0) catch |err| switch (err) {
             error.WouldBlock => {
-                std.Thread.sleep(25 * std.time.ns_per_ms);
+                sync_compat.sleep(25 * std.time.ns_per_ms);
                 continue;
             },
             else => return err,
@@ -133,7 +136,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
         const thread = std.Thread.spawn(.{}, handleClientThread, .{ctx}) catch |err| {
             _ = active_clients.fetchSub(1, .seq_cst);
             allocator.destroy(ctx);
-            std.posix.close(client_fd);
+            posix_compat.close(client_fd);
             return err;
         };
         thread.detach();
@@ -143,7 +146,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
     const max_wait_ms: usize = 2000;
     var waited_ms: usize = 0;
     while (active_clients.load(.seq_cst) != 0 and waited_ms < max_wait_ms) : (waited_ms += wait_step_ms) {
-        std.Thread.sleep(wait_step_ms * std.time.ns_per_ms);
+        sync_compat.sleep(wait_step_ms * std.time.ns_per_ms);
     }
 
     const clients_left = active_clients.load(.seq_cst);
@@ -153,9 +156,9 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
 }
 
 fn setSocketBlocking(fd: std.posix.fd_t) !void {
-    var flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-    flags &= ~(@as(usize, 1) << @bitOffsetOf(std.posix.O, "NONBLOCK"));
-    _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags);
+    var flags = try posix_compat.fcntl(fd, std.posix.F.GETFL, @as(c_int, 0));
+    flags &= ~@as(c_int, @intCast(@as(usize, 1) << @bitOffsetOf(std.posix.O, "NONBLOCK")));
+    _ = try posix_compat.fcntl(fd, std.posix.F.SETFL, flags);
 }
 
 // ── Client handler ────────────────────────────────────────────────────────────
@@ -165,7 +168,7 @@ fn handleClientThread(ctx: *ClientContext) void {
     const commands = ctx.commands;
     const fd = ctx.fd;
     defer {
-        std.posix.close(fd);
+        posix_compat.close(fd);
         allocator.destroy(ctx);
         _ = active_clients.fetchSub(1, .seq_cst);
     }
@@ -350,9 +353,13 @@ const StoreOp = struct {
                 var out_p: ?[*]u8 = null;
                 var out_l: usize = 0;
                 _ = c.transport_encode_kv_pairs(
-                    &out_p, &out_l, telC(tel),
-                    @ptrCast(key_ptrs.ptr), @ptrCast(key_lens.ptr),
-                    @ptrCast(val_ptrs.ptr), @ptrCast(val_lens.ptr),
+                    &out_p,
+                    &out_l,
+                    telC(tel),
+                    @ptrCast(key_ptrs.ptr),
+                    @ptrCast(key_lens.ptr),
+                    @ptrCast(val_ptrs.ptr),
+                    @ptrCast(val_lens.ptr),
                     @intCast(n),
                 );
                 self.result = .{ .ptr = out_p, .len = out_l };
@@ -378,7 +385,7 @@ const StoreOp = struct {
                 const inst = self.commands.stores.getPtr(self.store_key) orelse return error.StoreNotFound;
                 switch (inst.handle) {
                     .files => |*e| {
-                        var dir = std.fs.cwd().openDir(e.base_path, .{ .iterate = true }) catch {
+                        var dir = fs_compat.cwd().openDir(e.base_path, .{ .iterate = true }) catch {
                             tel.op_count += 1;
                             self.result = encodeKeys(tel, &[_][*:0]const u8{});
                             return;
@@ -388,7 +395,7 @@ const StoreOp = struct {
                         var walker = try dir.walk(self.allocator);
                         defer walker.deinit();
 
-                        var key_z_arr: std.ArrayList([:0]u8) = .{};
+                        var key_z_arr: std.ArrayList([:0]u8) = .empty;
                         defer {
                             for (key_z_arr.items) |k| self.allocator.free(k);
                             key_z_arr.deinit(self.allocator);
@@ -541,9 +548,13 @@ fn dispatch(
             var out_p: ?[*]u8 = null;
             var out_l: usize = 0;
             _ = c.transport_encode_kv_pairs(
-                &out_p, &out_l, telC(tel),
-                @ptrCast(key_ptrs.ptr), @ptrCast(key_lens.ptr),
-                @ptrCast(val_ptrs.ptr), @ptrCast(val_lens.ptr),
+                &out_p,
+                &out_l,
+                telC(tel),
+                @ptrCast(key_ptrs.ptr),
+                @ptrCast(key_lens.ptr),
+                @ptrCast(val_ptrs.ptr),
+                @ptrCast(val_lens.ptr),
                 @intCast(n),
             );
             return .{ .ptr = out_p, .len = out_l };
@@ -728,7 +739,7 @@ fn recvMessage(fd: std.posix.fd_t, allocator: Allocator) ![]u8 {
 fn writeAll(fd: std.posix.fd_t, data: []const u8) !void {
     var sent: usize = 0;
     while (sent < data.len) {
-        const n = try std.posix.write(fd, data[sent..]);
+        const n = try posix_compat.write(fd, data[sent..]);
         if (n == 0) return error.BrokenPipe;
         sent += n;
     }
@@ -755,18 +766,18 @@ fn installSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.INT, &act, null);
 }
 
-fn onSignal(_: i32) callconv(.c) void {
+fn onSignal(_: std.posix.SIG) callconv(.c) void {
     shutdown_requested.store(true, .seq_cst);
 }
 
 fn ensureSocketParent(socket_path: []const u8) !void {
     if (std.fs.path.dirname(socket_path)) |parent| {
-        if (parent.len > 0) try std.fs.cwd().makePath(parent);
+        if (parent.len > 0) try fs_compat.cwd().makePath(parent);
     }
 }
 
 fn autoOpenStores(allocator: Allocator, commands: *StorageCommands, data_dir: []const u8) !void {
-    var root = std.fs.cwd().openDir(data_dir, .{ .iterate = true }) catch |err| switch (err) {
+    var root = fs_compat.cwd().openDir(data_dir, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return,
         else => return err,
     };

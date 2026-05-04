@@ -1,4 +1,6 @@
 const std = @import("std");
+const posix_compat = @import("posix_compat.zig");
+const fs_compat = @import("fs_compat.zig");
 const commands = @import("commands.zig");
 const manifest_mod = @import("manifest.zig");
 const build_options = @import("build_options");
@@ -22,7 +24,7 @@ const health_checker = if (with_transport) struct {
             .unix => |path| connectUnixSocket(path, timeout_ms) catch return false,
             .tcp => |tcp| connectTcpSocket(tcp.host, tcp.port, timeout_ms) catch return false,
         };
-        defer std.posix.close(fd);
+        defer posix_compat.close(fd);
 
         const req = c.transport_req_ping() orelse return false;
         defer c.transport_req_free(req);
@@ -60,8 +62,8 @@ fn setSocketTimeout(fd: std.posix.fd_t, timeout_ms: u32) !void {
 }
 
 fn connectUnixSocket(path: []const u8, timeout_ms: u32) !std.posix.fd_t {
-    const fd = try std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
-    errdefer std.posix.close(fd);
+    const fd = try posix_compat.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
+    errdefer posix_compat.close(fd);
 
     var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
     addr.family = std.posix.AF.UNIX;
@@ -69,17 +71,17 @@ fn connectUnixSocket(path: []const u8, timeout_ms: u32) !std.posix.fd_t {
     @memcpy(addr.path[0..path.len], path);
     addr.path[path.len] = 0;
 
-    try std.posix.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
+    try posix_compat.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
     try setSocketTimeout(fd, timeout_ms);
     return fd;
 }
 
 fn connectTcpSocket(host: []const u8, port: u16, timeout_ms: u32) !std.posix.fd_t {
-    const fd = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
-    errdefer std.posix.close(fd);
+    const fd = try posix_compat.socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
+    errdefer posix_compat.close(fd);
 
-    const ip4 = try std.net.Address.parseIp4(host, port);
-    try std.posix.connect(fd, &ip4.any, ip4.getOsSockLen());
+    const ip4 = try posix_compat.parseIp4Address(host, port);
+    try posix_compat.connect(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
     try setSocketTimeout(fd, timeout_ms);
     return fd;
 }
@@ -106,7 +108,7 @@ fn recvFramed(fd: std.posix.fd_t, allocator: std.mem.Allocator) ![]u8 {
 fn writeAll(fd: std.posix.fd_t, data: []const u8) !void {
     var sent: usize = 0;
     while (sent < data.len) {
-        const n = try std.posix.write(fd, data[sent..]);
+        const n = try posix_compat.write(fd, data[sent..]);
         if (n == 0) return error.BrokenPipe;
         sent += n;
     }
@@ -128,13 +130,14 @@ comptime {
 }
 
 fn writeStdout(data: []const u8) void {
-    _ = std.posix.write(std.posix.STDOUT_FILENO, data) catch {};
+    _ = posix_compat.write(std.posix.STDOUT_FILENO, data) catch {};
 }
 
 fn printJson(allocator: std.mem.Allocator, ok: bool, data: ?[]const u8, tel: *const Telemetry) void {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buf);
+    const w = &aw.writer;
 
     if (ok) {
         w.writeAll("{\"ok\":true") catch return;
@@ -149,6 +152,7 @@ fn printJson(allocator: std.mem.Allocator, ok: bool, data: ?[]const u8, tel: *co
     tel.writeJson(w) catch return;
     w.writeAll("}\n") catch return;
 
+    buf = aw.toArrayList();
     writeStdout(buf.items);
 }
 
@@ -160,13 +164,10 @@ fn printErrorName(prefix: []const u8, err: anyerror) void {
     std.debug.print("{{\"ok\":false,\"error\":\"{s}: {s}\"}}\n", .{ prefix, @errorName(err) });
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+pub fn main(init: std.process.Init) !void {
+    fs_compat.setIo(init.io);
+    const allocator = init.gpa;
+    const args = try std.process.Args.toSlice(init.minimal.args, init.arena.allocator());
 
     if (args.len < 2) {
         printUsage();
@@ -273,15 +274,17 @@ pub fn main() !void {
             var tel = Telemetry.begin();
             tel.op_count += 1;
 
-            var buf: std.ArrayList(u8) = .{};
+            var buf: std.ArrayList(u8) = .empty;
             errdefer buf.deinit(allocator);
-            const w = buf.writer(allocator);
+            var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buf);
+            const w = &aw.writer;
             w.print("{{\"name\":\"{s}\",\"type\":\"{s}\",\"migrations\":[", .{ mfst.name, mfst.store_type.toString() }) catch return;
             for (mfst.migrations.items, 0..) |m, i| {
                 if (i > 0) w.writeByte(',') catch return;
                 w.print("\"{s}\"", .{m}) catch return;
             }
             w.writeAll("]}") catch return;
+            buf = aw.toArrayList();
             const data = buf.toOwnedSlice(allocator) catch null;
             defer if (data) |d| allocator.free(d);
             printJson(allocator, true, data, &tel);
@@ -313,7 +316,7 @@ fn getDataDir(args: []const []const u8) []const u8 {
             return args[i + 1];
         }
     }
-    return std.posix.getenv("DATA_DIR") orelse "./data";
+    return posix_compat.getenv("DATA_DIR") orelse "./data";
 }
 
 fn getBindConfig(allocator: std.mem.Allocator, args: []const []const u8, data_dir: []const u8) !server.BindConfig {

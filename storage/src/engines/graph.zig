@@ -1,4 +1,6 @@
 const std = @import("std");
+const fs_compat = @import("../fs_compat.zig");
+const posix_compat = @import("../posix_compat.zig");
 const Allocator = std.mem.Allocator;
 const Telemetry = @import("../telemetry.zig").Telemetry;
 
@@ -88,7 +90,7 @@ pub const GraphEngine = struct {
 
         const db_path = self.path[0..self.path.len];
         if (std.fs.path.dirname(db_path)) |parent| {
-            if (parent.len != 0) try std.fs.cwd().makePath(parent);
+            if (parent.len != 0) try fs_compat.cwd().makePath(parent);
         }
 
         var lib = try openRyuLib();
@@ -164,13 +166,15 @@ pub const GraphEngine = struct {
         defer api.destroy_string(raw_ptr);
         const raw = std.mem.span(raw_ptr);
 
-        var out: std.ArrayList(u8) = .{};
+        var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(allocator);
-        const writer = out.writer(allocator);
+        var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &out);
+        const writer = &aw.writer;
         try writer.writeAll("[{\"graph\":\"");
         try writeJsonEscaped(writer, raw);
         try writer.writeAll("\"}]");
 
+        out = aw.toArrayList();
         tel.addRead(out.items.len);
         tel.op_count += 1;
         return out.toOwnedSlice(allocator);
@@ -178,12 +182,12 @@ pub const GraphEngine = struct {
 
     pub fn getSize(self: *GraphEngine) !u64 {
         const db_path = self.path[0..self.path.len];
-        if (std.fs.cwd().statFile(db_path)) |st| {
+        if (fs_compat.cwd().statFile(db_path)) |st| {
             return st.size;
         } else |_| {}
 
         var total: u64 = 0;
-        var dir = std.fs.cwd().openDir(self.path, .{ .iterate = true }) catch return 0;
+        var dir = fs_compat.cwd().openDir(self.path, .{ .iterate = true }) catch return 0;
         defer dir.close();
 
         var walker = try dir.walk(self.allocator);
@@ -199,7 +203,7 @@ pub const GraphEngine = struct {
 };
 
 fn openRyuLib() !std.DynLib {
-    if (std.posix.getenv("RYUGRAPH_LIBRARY_PATH")) |path_z| {
+    if (posix_compat.getenv("RYUGRAPH_LIBRARY_PATH")) |path_z| {
         if (path_z.len != 0) return std.DynLib.open(path_z);
     }
 
