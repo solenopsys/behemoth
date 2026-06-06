@@ -14,6 +14,15 @@ const SYMBOLS = {
   transport_close:        { args: [FFIType.i32],                    returns: FFIType.void },
   transport_send_req:     { args: [FFIType.i32, FFIType.ptr],       returns: FFIType.i32 },
   transport_recv_resp:    { args: [FFIType.i32],                    returns: FFIType.ptr },
+  transport_pool_create:  { args: [],                               returns: FFIType.ptr },
+  transport_pool_free:    { args: [FFIType.ptr],                    returns: FFIType.void },
+  transport_pool_set_default_unix: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
+  transport_pool_set_default_tcp:  { args: [FFIType.ptr, FFIType.cstring, FFIType.u16], returns: FFIType.i32 },
+  transport_pool_add_unix: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
+  transport_pool_add_tcp:  { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.u16], returns: FFIType.i32 },
+  transport_pool_remove:   { args: [FFIType.ptr, FFIType.cstring],  returns: FFIType.i32 },
+  transport_pool_close_all:{ args: [FFIType.ptr],                   returns: FFIType.void },
+  transport_pool_request:  { args: [FFIType.ptr, FFIType.cstring, FFIType.ptr], returns: FFIType.ptr },
 
   // Request builders
   transport_req_ping:       { args: [],                                                         returns: FFIType.ptr },
@@ -112,6 +121,9 @@ export type StorageTransportErrorCode =
   | "SEND_FAILED"
   | "RECV_EXCEPTION"
   | "RECV_TIMEOUT_OR_CLOSED"
+  | "POOL_CREATE_FAILED"
+  | "POOL_CONFIG_FAILED"
+  | "POOL_REQUEST_FAILED"
   | "REMOTE_ERROR"
   | "DECODE_JSON_ERROR";
 
@@ -131,7 +143,16 @@ export interface TcpSocketConfig {
 }
 
 /** Pass this (or a plain socket-path string) to StorageConnection. */
-export type StorageConnectionConfig = UnixSocketConfig | TcpSocketConfig;
+export type StorageConnectionTargetConfig = UnixSocketConfig | TcpSocketConfig;
+
+export interface PoolSocketConfig {
+  kind: "pool";
+  pool: NativeStorageConnectionPool;
+  key?: string | (() => string | undefined);
+  label?: string;
+}
+
+export type StorageConnectionConfig = StorageConnectionTargetConfig | PoolSocketConfig;
 
 export class StorageTransportError extends Error {
   readonly code: StorageTransportErrorCode;
@@ -182,6 +203,131 @@ export interface StorageConnectionOptions {
   reconnectAttempts?: number;
 }
 
+// ── Native connection pool ───────────────────────────────────────────────────
+
+export class NativeStorageConnectionPool {
+  private handle: number;
+
+  constructor(defaultConfig?: string | StorageConnectionTargetConfig) {
+    this.handle = s.transport_pool_create() as number;
+    if (!this.handle) {
+      throw new StorageTransportError(
+        "POOL_CREATE_FAILED",
+        "failed to create native storage connection pool",
+      );
+    }
+    if (defaultConfig) this.setDefault(defaultConfig);
+  }
+
+  setDefault(config: string | StorageConnectionTargetConfig): void {
+    const normalized = normalizeConnectionConfig(config);
+    const rc = this.applyConfig(undefined, normalized);
+    if (rc !== 0) {
+      throw new StorageTransportError(
+        "POOL_CONFIG_FAILED",
+        `failed to set default storage pool connection: ${connectionLabel(normalized)}`,
+        { socketPath: connectionLabel(normalized) },
+      );
+    }
+  }
+
+  add(key: string, config: string | StorageConnectionTargetConfig): void {
+    if (!key || key.trim().length === 0) {
+      throw new StorageTransportError(
+        "POOL_CONFIG_FAILED",
+        "storage pool key is empty",
+      );
+    }
+    const normalized = normalizeConnectionConfig(config);
+    const rc = this.applyConfig(key, normalized);
+    if (rc !== 0) {
+      throw new StorageTransportError(
+        "POOL_CONFIG_FAILED",
+        `failed to add storage pool connection "${key}": ${connectionLabel(normalized)}`,
+        { socketPath: connectionLabel(normalized) },
+      );
+    }
+  }
+
+  remove(key: string): boolean {
+    const rc = s.transport_pool_remove(this.handle as any, cstr(key)) as number;
+    return rc === 1;
+  }
+
+  closeAll(): void {
+    try {
+      s.transport_pool_close_all(this.handle as any);
+    } catch {}
+  }
+
+  free(): void {
+    if (!this.handle) return;
+    const handle = this.handle;
+    this.handle = 0;
+    try {
+      s.transport_pool_free(handle as any);
+    } catch {}
+  }
+
+  request(key: string | undefined, makeReq: () => number, label: string): Response {
+    if (!this.handle) {
+      throw new StorageTransportError(
+        "POOL_REQUEST_FAILED",
+        `storage pool is closed (${label})`,
+        { socketPath: label },
+      );
+    }
+
+    const req = makeReq();
+    if (!req) {
+      throw new StorageTransportError(
+        "SEND_FAILED",
+        `failed to build transport request (pool: ${label})`,
+        { socketPath: label },
+      );
+    }
+
+    let resp: number;
+    try {
+      resp = s.transport_pool_request(this.handle as any, cstr(key ?? ""), req as any) as number;
+    } catch (cause) {
+      throw new StorageTransportError(
+        "POOL_REQUEST_FAILED",
+        `transport_pool_request threw an exception (pool: ${label})`,
+        { socketPath: label, cause },
+      );
+    } finally {
+      if (ENABLE_REQ_FREE) {
+        try {
+          s.transport_req_free(req as any);
+        } catch {}
+      }
+    }
+
+    if (!resp) {
+      throw new StorageTransportError(
+        "POOL_REQUEST_FAILED",
+        `transport pool request failed (missing connection, timeout or socket error): ${label}`,
+        { socketPath: label },
+      );
+    }
+    return new Response(resp, label);
+  }
+
+  private applyConfig(key: string | undefined, config: StorageConnectionTargetConfig): number {
+    if (config.kind === "unix") {
+      const path = cstr(config.socketPath);
+      return key === undefined
+        ? s.transport_pool_set_default_unix(this.handle as any, path) as number
+        : s.transport_pool_add_unix(this.handle as any, cstr(key), path) as number;
+    }
+    const host = cstr(config.host);
+    return key === undefined
+      ? s.transport_pool_set_default_tcp(this.handle as any, host, config.port) as number
+      : s.transport_pool_add_tcp(this.handle as any, cstr(key), host, config.port) as number;
+  }
+}
+
 // ── Connection ────────────────────────────────────────────────────────────────
 
 export class StorageConnection {
@@ -191,6 +337,7 @@ export class StorageConnection {
   private readonly config: StorageConnectionConfig;
   private readonly operationTimeoutMs?: number;
   private readonly reconnectAttempts: number;
+  private readonly poolKey?: string | (() => string | undefined);
 
   /**
    * Connect to storage.
@@ -210,16 +357,25 @@ export class StorageConnection {
   constructor(config: string | StorageConnectionConfig, options?: StorageConnectionOptions) {
     this.config = typeof config === "string" ? { kind: "unix", socketPath: config } : config;
     this.socketPath =
-      this.config.kind === "unix" ? this.config.socketPath : `${this.config.host}:${this.config.port}`;
+      this.config.kind === "unix"
+        ? this.config.socketPath
+        : this.config.kind === "tcp"
+          ? `${this.config.host}:${this.config.port}`
+          : this.config.label ?? "storage-pool";
     this.operationTimeoutMs = options?.operationTimeoutMs;
     this.reconnectAttempts = normalizeNonNegativeInt(
       options?.reconnectAttempts,
       normalizeNonNegativeInt(process.env.TRANSPORT_RECONNECT_ATTEMPTS, 1),
     );
-    this.connect();
+    if (this.config.kind === "pool") {
+      this.poolKey = this.config.key;
+    } else {
+      this.connect();
+    }
   }
 
   private connect(): void {
+    if (this.config.kind === "pool") return;
     if (this.config.kind === "unix") {
       const socketPath = this.config.socketPath;
       this.validateSocketPath(socketPath);
@@ -298,6 +454,7 @@ export class StorageConnection {
   }
 
   private ensureConnected(): void {
+    if (this.config.kind === "pool") return;
     if (this.fd >= 0) return;
     this.connect();
   }
@@ -320,6 +477,7 @@ export class StorageConnection {
   }
 
   close(): void {
+    if (this.config.kind === "pool") return;
     if (this.fd >= 0) {
       const fd = this.fd;
       this.fd = -1;
@@ -338,6 +496,10 @@ export class StorageConnection {
   // ── Internal send/recv ───────────────────────────────────────────────────
 
   private sendRecv(makeReq: () => number): Response {
+    if (this.config.kind === "pool") {
+      return this.config.pool.request(this.resolvePoolKey(), makeReq, this.socketPath);
+    }
+
     for (let attempt = 0; attempt <= this.reconnectAttempts; attempt++) {
       this.ensureConnected();
 
@@ -416,6 +578,11 @@ export class StorageConnection {
       `transport_send_req exhausted reconnect attempts (socket: ${this.socketPath})`,
       { socketPath: this.socketPath },
     );
+  }
+
+  private resolvePoolKey(): string | undefined {
+    if (typeof this.poolKey === "function") return this.poolKey();
+    return this.poolKey;
   }
 
   // ── Store management ─────────────────────────────────────────────────────
@@ -744,6 +911,14 @@ function normalizeNonNegativeInt(value: unknown, fallback: number): number {
 
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return Math.trunc(parsed);
+}
+
+function normalizeConnectionConfig(config: string | StorageConnectionTargetConfig): StorageConnectionTargetConfig {
+  return typeof config === "string" ? { kind: "unix", socketPath: config } : config;
+}
+
+function connectionLabel(config: StorageConnectionTargetConfig): string {
+  return config.kind === "unix" ? config.socketPath : `${config.host}:${config.port}`;
 }
 
 function cstr(s: string): Buffer { return Buffer.from(s + "\0"); }

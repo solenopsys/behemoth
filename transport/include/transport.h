@@ -11,6 +11,7 @@ extern "C" {
 /* Opaque handles */
 typedef struct TransportRequest  TransportRequest;
 typedef struct TransportResponse TransportResponse;
+typedef struct TransportPool     TransportPool;
 
 /* StoreType mirrors the capnp enum */
 typedef enum {
@@ -141,6 +142,22 @@ int32_t transport_send_req(int32_t fd, TransportRequest* req);
 
 /* Receive and decode a response from fd.  Caller must free with transport_resp_free(). */
 TransportResponse* transport_recv_resp(int32_t fd);
+
+/* ── Client-side connection pool ───────────────────────────────────────────── */
+
+TransportPool* transport_pool_create(void);
+void           transport_pool_free(TransportPool* pool);
+int32_t        transport_pool_set_default(TransportPool* pool, const TransportConfig* cfg);
+int32_t        transport_pool_add(TransportPool* pool, const char* key, const TransportConfig* cfg);
+int32_t        transport_pool_set_default_unix(TransportPool* pool, const char* path);
+int32_t        transport_pool_set_default_tcp(TransportPool* pool, const char* host, uint16_t port);
+int32_t        transport_pool_add_unix(TransportPool* pool, const char* key, const char* path);
+int32_t        transport_pool_add_tcp(TransportPool* pool, const char* key, const char* host, uint16_t port);
+int32_t        transport_pool_remove(TransportPool* pool, const char* key);
+void           transport_pool_close_all(TransportPool* pool);
+
+/* Send request through a pooled connection. key == NULL or "" uses default. */
+TransportResponse* transport_pool_request(TransportPool* pool, const char* key, TransportRequest* req);
 
 /* ── Server-side: decode incoming request ──────────────────────────────────── */
 

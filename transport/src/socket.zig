@@ -21,6 +21,16 @@ pub fn setOperationTimeout(fd: std.posix.fd_t, timeout_ms: u32) !void {
     try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, opt);
 }
 
+pub fn setTcpNoDelay(fd: std.posix.fd_t) !void {
+    const one: c_int = 1;
+    try std.posix.setsockopt(
+        fd,
+        std.posix.IPPROTO.TCP,
+        std.posix.TCP.NODELAY,
+        std.mem.asBytes(&one),
+    );
+}
+
 // ── Unix socket ───────────────────────────────────────────────────────────────
 
 /// Create a Unix domain socket server, bind, and listen.
@@ -115,8 +125,9 @@ pub fn connectTcp(host: [*:0]const u8, port: u16) !std.posix.fd_t {
     );
     errdefer posix_compat.close(fd);
 
-    const ip4 = try posix_compat.parseIp4Address(std.mem.span(host), port);
+    const ip4 = try posix_compat.resolveHost(std.mem.span(host), port);
     try posix_compat.connect(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
+    try setTcpNoDelay(fd);
     try setOperationTimeout(fd, getOperationTimeoutMs());
 
     return fd;

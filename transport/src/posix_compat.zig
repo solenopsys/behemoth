@@ -58,6 +58,34 @@ pub fn parseIp4Address(host: []const u8, port: u16) !std.posix.sockaddr.in {
     };
 }
 
+pub fn resolveHost(host: []const u8, port: u16) !std.posix.sockaddr.in {
+    // fast path: already an IPv4 literal
+    if (std.Io.net.Ip4Address.parse(host, port)) |ip4| {
+        return .{
+            .port = std.mem.nativeToBig(u16, ip4.port),
+            .addr = std.mem.readInt(u32, &ip4.bytes, .little),
+        };
+    } else |_| {}
+
+    // hostname — use getaddrinfo
+    const host_z = try std.posix.toPosixPath(host);
+    var port_buf: [6]u8 = undefined;
+    const port_str = std.fmt.bufPrintZ(&port_buf, "{d}", .{port}) catch return error.Unexpected;
+
+    var hints = std.mem.zeroes(std.c.addrinfo);
+    hints.family = std.posix.AF.INET;
+    hints.socktype = std.posix.SOCK.STREAM;
+
+    var res: ?*std.c.addrinfo = null;
+    const gai_rc = std.c.getaddrinfo(&host_z, port_str.ptr, &hints, &res);
+    if (@intFromEnum(gai_rc) != 0) return error.NameResolutionFailed;
+    defer std.c.freeaddrinfo(res.?);
+
+    const ai = res orelse return error.NameResolutionFailed;
+    const sa = ai.addr orelse return error.NameResolutionFailed;
+    return @as(*const std.posix.sockaddr.in, @ptrCast(@alignCast(sa))).*;
+}
+
 pub fn bind(fd: std.posix.fd_t, addr: *const anyopaque, len: std.posix.socklen_t) !void {
     switch (std.c.errno(std.c.bind(fd, @ptrCast(@alignCast(addr)), len))) {
         .SUCCESS => return,
