@@ -146,4 +146,20 @@ pub fn build(b: *std.Build) void {
 
     const lib = addTransportLib(b, target, optimize, "transport");
     b.installArtifact(lib);
+
+    // In-memory mock with the same C ABI — for service tests without storage.
+    // `zig build mock` → zig-out/lib/libtransport-mock.so
+    const mock = b.addLibrary(.{
+        .name = "transport-mock",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/mock.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    mock.root_module.link_libc = true;
+    const mock_install = b.addInstallArtifact(mock, .{});
+    const mock_step = b.step("mock", "Build in-memory mock transport library");
+    mock_step.dependOn(&mock_install.step);
 }
