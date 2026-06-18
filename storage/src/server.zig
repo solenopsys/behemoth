@@ -25,6 +25,7 @@ const max_msg: u32 = 64 * 1024 * 1024;
 
 var shutdown_requested = std.atomic.Value(bool).init(false);
 var active_clients = std.atomic.Value(usize).init(0);
+var cache_key_counter = std.atomic.Value(u64).init(0);
 var stores_rwlock: sync_compat.RwLock = .{};
 var pool: ThreadPool = undefined;
 
@@ -250,6 +251,7 @@ const StoreOp = struct {
     // Params (borrowed — safe because client thread waits for done)
     sql_ptr: [*:0]const u8 = "",
     key: []const u8 = "",
+    cache_key: []const u8 = "",
     value: []const u8 = "",
     prefix: []const u8 = "",
     migration_id: []const u8 = "",
@@ -325,11 +327,31 @@ const StoreOp = struct {
                 try self.commands.kvPut(self.store_key, self.key, self.value, &tel);
                 self.result = encodeOk(tel);
             },
+            c.REQ_KV_PUT_FROM_CACHE => {
+                const data = try valkey_mod.get(self.allocator, self.cache_key) orelse return error.CacheKeyNotFound;
+                defer self.allocator.free(data);
+                tel.addRead(@intCast(data.len));
+                try self.commands.kvPut(self.store_key, self.key, data, &tel);
+                self.result = encodeOk(tel);
+            },
             c.REQ_KV_GET => {
                 const data = try self.commands.kvGet(self.store_key, self.key, &tel);
                 if (data) |d| {
                     defer self.allocator.free(d);
                     self.result = encodeFound(tel, 1, d);
+                } else {
+                    self.result = encodeFound(tel, 0, &[_]u8{});
+                }
+            },
+            c.REQ_KV_GET_TO_CACHE => {
+                const data = try self.commands.kvGet(self.store_key, self.key, &tel);
+                if (data) |d| {
+                    defer self.allocator.free(d);
+                    const generated_cache_key = try makeCacheKey(self.allocator);
+                    defer self.allocator.free(generated_cache_key);
+                    try valkey_mod.put(generated_cache_key, d);
+                    tel.addWrite(@intCast(d.len));
+                    self.result = encodeFound(tel, 1, generated_cache_key);
                 } else {
                     self.result = encodeFound(tel, 0, &[_]u8{});
                 }
@@ -450,6 +472,14 @@ const StoreOp = struct {
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 const CBytes = struct { ptr: ?[*]u8, len: usize };
+
+fn makeCacheKey(allocator: Allocator) ![]u8 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.MONOTONIC, &ts);
+    const nanos: u128 = @as(u128, @intCast(ts.sec)) * std.time.ns_per_s + @as(u128, @intCast(ts.nsec));
+    const n = cache_key_counter.fetchAdd(1, .monotonic);
+    return std.fmt.allocPrint(allocator, "transport:kvs:{x}:{x}", .{ nanos, n });
+}
 
 fn dispatch(
     allocator: Allocator,
@@ -612,9 +642,14 @@ fn dispatch(
     }
 
     if (cmd == c.REQ_KV_PUT or cmd == c.REQ_KV_GET or cmd == c.REQ_KV_DELETE or
+        cmd == c.REQ_KV_PUT_FROM_CACHE or cmd == c.REQ_KV_GET_TO_CACHE or
         cmd == c.REQ_FILE_PUT or cmd == c.REQ_FILE_GET or cmd == c.REQ_FILE_DELETE)
     {
         op.key = std.mem.span(c.transport_req_reader_key(reader));
+    }
+
+    if (cmd == c.REQ_KV_PUT_FROM_CACHE) {
+        op.cache_key = std.mem.span(c.transport_req_reader_cache_key(reader));
     }
 
     if (cmd == c.REQ_KV_PUT or cmd == c.REQ_FILE_PUT) {

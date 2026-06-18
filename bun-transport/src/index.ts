@@ -37,7 +37,9 @@ const SYMBOLS = {
   transport_req_migrate:    { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_archive:    { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_kv_put:     { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.ptr, FFIType.u64], returns: FFIType.ptr },
+  transport_req_kv_put_from_cache: { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.ptr },
   transport_req_kv_get:     { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
+  transport_req_kv_get_to_cache: { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],   returns: FFIType.ptr },
   transport_req_kv_delete:  { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_kv_list:    { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring],       returns: FFIType.ptr },
   transport_req_file_put:   { args: [FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.ptr, FFIType.u64], returns: FFIType.ptr },
@@ -642,9 +644,21 @@ export class StorageConnection {
     ).telemetry();
   }
 
+  kvPutFromCache(ms: string, store: string, key: string, cacheKey: string): Telemetry {
+    return this.sendRecv(
+      () => s.transport_req_kv_put_from_cache(cstr(ms), cstr(store), cstr(key), cstr(cacheKey)) as number,
+    ).telemetry();
+  }
+
   kvGet(ms: string, store: string, key: string): Buffer | null {
     const resp = this.sendRecv(() => s.transport_req_kv_get(cstr(ms), cstr(store), cstr(key)) as number);
     return resp.foundData();
+  }
+
+  kvGetToCache(ms: string, store: string, key: string): string | null {
+    const resp = this.sendRecv(() => s.transport_req_kv_get_to_cache(cstr(ms), cstr(store), cstr(key)) as number);
+    const cacheKey = resp.foundData();
+    return cacheKey ? cacheKey.toString("utf8") : null;
   }
 
   kvDelete(ms: string, store: string, key: string): boolean {

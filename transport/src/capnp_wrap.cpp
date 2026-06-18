@@ -196,6 +196,18 @@ extern "C" TransportRequest* transport_req_kv_put(const char* ms, const char* st
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_kv_put")
 }
 
+extern "C" TransportRequest* transport_req_kv_put_from_cache(const char* ms, const char* store,
+                                                              const char* key, const char* cache_key) {
+    try {
+        auto* r = make_req(ms, store);
+        if (!r) return nullptr;
+        auto body = r->req.getBody().initKvPutFromCache();
+        body.setKey(key);
+        body.setCacheKey(cache_key ? cache_key : "");
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_kv_put_from_cache")
+}
+
 extern "C" TransportRequest* transport_req_kv_get(const char* ms, const char* store, const char* key) {
     try {
         auto* r = make_req(ms, store);
@@ -203,6 +215,15 @@ extern "C" TransportRequest* transport_req_kv_get(const char* ms, const char* st
         r->req.getBody().initKvGet().setKey(key);
         return r;
     } TRANSPORT_CATCH_RET(nullptr, "transport_req_kv_get")
+}
+
+extern "C" TransportRequest* transport_req_kv_get_to_cache(const char* ms, const char* store, const char* key) {
+    try {
+        auto* r = make_req(ms, store);
+        if (!r) return nullptr;
+        r->req.getBody().initKvGetToCache().setKey(key);
+        return r;
+    } TRANSPORT_CATCH_RET(nullptr, "transport_req_kv_get_to_cache")
 }
 
 extern "C" TransportRequest* transport_req_kv_delete(const char* ms, const char* store, const char* key) {
@@ -711,11 +732,20 @@ extern "C" const char* transport_req_reader_key(TransportRequestReader* r) {
         auto which = r->req.getBody().which();
         if (which == Request::Body::KV_PUT)      return r->req.getBody().getKvPut().getKey().cStr();
         if (which == Request::Body::KV_GET)      return r->req.getBody().getKvGet().getKey().cStr();
+        if (which == Request::Body::KV_PUT_FROM_CACHE) return r->req.getBody().getKvPutFromCache().getKey().cStr();
+        if (which == Request::Body::KV_GET_TO_CACHE)   return r->req.getBody().getKvGetToCache().getKey().cStr();
         if (which == Request::Body::KV_DELETE)   return r->req.getBody().getKvDelete().getKey().cStr();
         if (which == Request::Body::FILE_PUT)    return r->req.getBody().getFilePut().getKey().cStr();
         if (which == Request::Body::FILE_GET)    return r->req.getBody().getFileGet().getKey().cStr();
         if (which == Request::Body::FILE_DELETE) return r->req.getBody().getFileDelete().getKey().cStr();
         return "";
+    } catch (...) { return ""; }
+}
+extern "C" const char* transport_req_reader_cache_key(TransportRequestReader* r) {
+    if (!r) return "";
+    try {
+        if (r->req.getBody().which() != Request::Body::KV_PUT_FROM_CACHE) return "";
+        return r->req.getBody().getKvPutFromCache().getCacheKey().cStr();
     } catch (...) { return ""; }
 }
 extern "C" const uint8_t* transport_req_reader_value_ptr(TransportRequestReader* r) {

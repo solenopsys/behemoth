@@ -36,6 +36,7 @@ CAPNP_DECLARE_SCHEMA(c785230deb16fb07);
 CAPNP_DECLARE_SCHEMA(d431827dda2bbbf8);
 CAPNP_DECLARE_SCHEMA(904ff2c6ece1052c);
 CAPNP_DECLARE_SCHEMA(f116e33177711079);
+CAPNP_DECLARE_SCHEMA(b57cf2d3fd4f4444);
 CAPNP_DECLARE_SCHEMA(8507108579d59fc5);
 CAPNP_DECLARE_SCHEMA(e37787ecc38b216b);
 CAPNP_DECLARE_SCHEMA(8437388f75fb5f43);
@@ -86,6 +87,7 @@ struct Request {
   struct ArchiveBody;
   struct KvPutBody;
   struct KvKeyBody;
+  struct KvCacheRefBody;
   struct KvListBody;
   struct FilePutBody;
   struct FileKeyBody;
@@ -186,6 +188,21 @@ struct Request::KvKeyBody {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(f116e33177711079, 0, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct Request::KvCacheRefBody {
+  KvCacheRefBody() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(b57cf2d3fd4f4444, 0, 2)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -315,6 +332,8 @@ struct Request::Body {
     DUMP_READ,
     CREATE,
     STORE_STATS,
+    KV_PUT_FROM_CACHE,
+    KV_GET_TO_CACHE,
   };
 
   struct _capnpPrivate {
@@ -1170,6 +1189,97 @@ private:
 };
 #endif  // !CAPNP_LITE
 
+class Request::KvCacheRefBody::Reader {
+public:
+  typedef KvCacheRefBody Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasKey() const;
+  inline  ::capnp::Text::Reader getKey() const;
+
+  inline bool hasCacheKey() const;
+  inline  ::capnp::Text::Reader getCacheKey() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class Request::KvCacheRefBody::Builder {
+public:
+  typedef KvCacheRefBody Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasKey();
+  inline  ::capnp::Text::Builder getKey();
+  inline void setKey( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initKey(unsigned int size);
+  inline void adoptKey(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownKey();
+
+  inline bool hasCacheKey();
+  inline  ::capnp::Text::Builder getCacheKey();
+  inline void setCacheKey( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCacheKey(unsigned int size);
+  inline void adoptCacheKey(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCacheKey();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class Request::KvCacheRefBody::Pipeline {
+public:
+  typedef KvCacheRefBody Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
 class Request::KvListBody::Reader {
 public:
   typedef KvListBody Reads;
@@ -1813,6 +1923,14 @@ public:
   inline bool isStoreStats() const;
   inline  ::capnp::Void getStoreStats() const;
 
+  inline bool isKvPutFromCache() const;
+  inline bool hasKvPutFromCache() const;
+  inline  ::Request::KvCacheRefBody::Reader getKvPutFromCache() const;
+
+  inline bool isKvGetToCache() const;
+  inline bool hasKvGetToCache() const;
+  inline  ::Request::KvKeyBody::Reader getKvGetToCache() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2005,6 +2123,22 @@ public:
   inline bool isStoreStats();
   inline  ::capnp::Void getStoreStats();
   inline void setStoreStats( ::capnp::Void value = ::capnp::VOID);
+
+  inline bool isKvPutFromCache();
+  inline bool hasKvPutFromCache();
+  inline  ::Request::KvCacheRefBody::Builder getKvPutFromCache();
+  inline void setKvPutFromCache( ::Request::KvCacheRefBody::Reader value);
+  inline  ::Request::KvCacheRefBody::Builder initKvPutFromCache();
+  inline void adoptKvPutFromCache(::capnp::Orphan< ::Request::KvCacheRefBody>&& value);
+  inline ::capnp::Orphan< ::Request::KvCacheRefBody> disownKvPutFromCache();
+
+  inline bool isKvGetToCache();
+  inline bool hasKvGetToCache();
+  inline  ::Request::KvKeyBody::Builder getKvGetToCache();
+  inline void setKvGetToCache( ::Request::KvKeyBody::Reader value);
+  inline  ::Request::KvKeyBody::Builder initKvGetToCache();
+  inline void adoptKvGetToCache(::capnp::Orphan< ::Request::KvKeyBody>&& value);
+  inline ::capnp::Orphan< ::Request::KvKeyBody> disownKvGetToCache();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -3348,6 +3482,74 @@ inline void Request::KvKeyBody::Builder::adoptKey(
 inline ::capnp::Orphan< ::capnp::Text> Request::KvKeyBody::Builder::disownKey() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool Request::KvCacheRefBody::Reader::hasKey() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::KvCacheRefBody::Builder::hasKey() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader Request::KvCacheRefBody::Reader::getKey() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder Request::KvCacheRefBody::Builder::getKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+inline void Request::KvCacheRefBody::Builder::setKey( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder Request::KvCacheRefBody::Builder::initKey(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), size);
+}
+inline void Request::KvCacheRefBody::Builder::adoptKey(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> Request::KvCacheRefBody::Builder::disownKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool Request::KvCacheRefBody::Reader::hasCacheKey() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::KvCacheRefBody::Builder::hasCacheKey() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader Request::KvCacheRefBody::Reader::getCacheKey() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder Request::KvCacheRefBody::Builder::getCacheKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+inline void Request::KvCacheRefBody::Builder::setCacheKey( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder Request::KvCacheRefBody::Builder::initCacheKey(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), size);
+}
+inline void Request::KvCacheRefBody::Builder::adoptCacheKey(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> Request::KvCacheRefBody::Builder::disownCacheKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
 inline bool Request::KvListBody::Reader::hasPrefix() const {
@@ -4805,6 +5007,114 @@ inline void Request::Body::Builder::setStoreStats( ::capnp::Void value) {
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::STORE_STATS);
   _builder.setDataField< ::capnp::Void>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Request::Body::Reader::isKvPutFromCache() const {
+  return which() == Request::Body::KV_PUT_FROM_CACHE;
+}
+inline bool Request::Body::Builder::isKvPutFromCache() {
+  return which() == Request::Body::KV_PUT_FROM_CACHE;
+}
+inline bool Request::Body::Reader::hasKvPutFromCache() const {
+  if (which() != Request::Body::KV_PUT_FROM_CACHE) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::Body::Builder::hasKvPutFromCache() {
+  if (which() != Request::Body::KV_PUT_FROM_CACHE) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Request::KvCacheRefBody::Reader Request::Body::Reader::getKvPutFromCache() const {
+  KJ_IREQUIRE((which() == Request::Body::KV_PUT_FROM_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::Request::KvCacheRefBody::Builder Request::Body::Builder::getKvPutFromCache() {
+  KJ_IREQUIRE((which() == Request::Body::KV_PUT_FROM_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::setKvPutFromCache( ::Request::KvCacheRefBody::Reader value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_PUT_FROM_CACHE);
+  ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::Request::KvCacheRefBody::Builder Request::Body::Builder::initKvPutFromCache() {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_PUT_FROM_CACHE);
+  return ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::adoptKvPutFromCache(
+    ::capnp::Orphan< ::Request::KvCacheRefBody>&& value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_PUT_FROM_CACHE);
+  ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Request::KvCacheRefBody> Request::Body::Builder::disownKvPutFromCache() {
+  KJ_IREQUIRE((which() == Request::Body::KV_PUT_FROM_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvCacheRefBody>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline bool Request::Body::Reader::isKvGetToCache() const {
+  return which() == Request::Body::KV_GET_TO_CACHE;
+}
+inline bool Request::Body::Builder::isKvGetToCache() {
+  return which() == Request::Body::KV_GET_TO_CACHE;
+}
+inline bool Request::Body::Reader::hasKvGetToCache() const {
+  if (which() != Request::Body::KV_GET_TO_CACHE) return false;
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Request::Body::Builder::hasKvGetToCache() {
+  if (which() != Request::Body::KV_GET_TO_CACHE) return false;
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::Request::KvKeyBody::Reader Request::Body::Reader::getKvGetToCache() const {
+  KJ_IREQUIRE((which() == Request::Body::KV_GET_TO_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::Request::KvKeyBody::Builder Request::Body::Builder::getKvGetToCache() {
+  KJ_IREQUIRE((which() == Request::Body::KV_GET_TO_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::setKvGetToCache( ::Request::KvKeyBody::Reader value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_GET_TO_CACHE);
+  ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::Request::KvKeyBody::Builder Request::Body::Builder::initKvGetToCache() {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_GET_TO_CACHE);
+  return ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Request::Body::Builder::adoptKvGetToCache(
+    ::capnp::Orphan< ::Request::KvKeyBody>&& value) {
+  _builder.setDataField<Request::Body::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Request::Body::KV_GET_TO_CACHE);
+  ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::Request::KvKeyBody> Request::Body::Builder::disownKvGetToCache() {
+  KJ_IREQUIRE((which() == Request::Body::KV_GET_TO_CACHE),
+              "Must check which() before get()ing a union member.");
+  return ::capnp::_::PointerHelpers< ::Request::KvKeyBody>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
 inline bool Response::Reader::hasTelemetry() const {

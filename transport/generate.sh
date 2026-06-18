@@ -6,17 +6,27 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! command -v capnp &>/dev/null; then
-  echo "ERROR: capnp not found. Install with: sudo pacman -S capnproto" >&2
+CAPNP_BIN="${CAPNP:-capnp}"
+CAPNPC_CXX_BIN="${CAPNPC_CXX:-capnpc-c++}"
+REQUIRED_VERSION="1.2.0"
+
+if ! command -v "$CAPNP_BIN" &>/dev/null; then
+  echo "ERROR: capnp not found. Set CAPNP=/path/to/capnp or install capnproto ${REQUIRED_VERSION}" >&2
   exit 1
 fi
 
-echo "capnp $(capnp --version)"
+VERSION_OUTPUT="$("$CAPNP_BIN" --version)"
+echo "capnp ${VERSION_OUTPUT}"
+if [[ "$VERSION_OUTPUT" != *" ${REQUIRED_VERSION}" ]]; then
+  echo "ERROR: capnp ${REQUIRED_VERSION} is required to match vendored runtime" >&2
+  echo "       build/use vendor/capnproto/c++ tools and set CAPNP/CAPNPC_CXX if needed" >&2
+  exit 1
+fi
 
 cd "$SCRIPT_DIR"
 
-capnp compile \
-  -oc++ \
+"$CAPNP_BIN" compile \
+  -o"$CAPNPC_CXX_BIN" \
   --src-prefix=schema \
   -I schema \
   schema/wire.capnp

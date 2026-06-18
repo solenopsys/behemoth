@@ -42,11 +42,14 @@ TransportRequest* transport_req_close(const char* ms, const char* store);
 TransportRequest* transport_req_exec_sql(const char* ms, const char* store, const char* sql);
 TransportRequest* transport_req_query_sql(const char* ms, const char* store, const char* sql);
 TransportRequest* transport_req_size(const char* ms, const char* store);
+TransportRequest* transport_req_store_stats(const char* ms, const char* store);
 TransportRequest* transport_req_manifest(const char* ms, const char* store);
 TransportRequest* transport_req_migrate(const char* ms, const char* store, const char* migration_id);
 TransportRequest* transport_req_archive(const char* ms, const char* store, const char* output_path);
 TransportRequest* transport_req_kv_put(const char* ms, const char* store, const char* key, const uint8_t* value, size_t value_len);
+TransportRequest* transport_req_kv_put_from_cache(const char* ms, const char* store, const char* key, const char* cache_key);
 TransportRequest* transport_req_kv_get(const char* ms, const char* store, const char* key);
+TransportRequest* transport_req_kv_get_to_cache(const char* ms, const char* store, const char* key);
 TransportRequest* transport_req_kv_delete(const char* ms, const char* store, const char* key);
 TransportRequest* transport_req_kv_list(const char* ms, const char* store, const char* prefix);
 TransportRequest* transport_req_file_put(const char* ms, const char* store, const char* key, const uint8_t* data, size_t data_len);
@@ -190,6 +193,8 @@ typedef enum {
     REQ_DUMP_READ   = 23,
     REQ_CREATE      = 24,
     REQ_STATS       = 25,
+    REQ_KV_PUT_FROM_CACHE = 26,
+    REQ_KV_GET_TO_CACHE   = 27,
 } RequestCmd;
 
 TransportRequestReader* transport_req_reader_decode(const uint8_t* buf, size_t len);
@@ -202,6 +207,7 @@ const char* transport_req_reader_sql(TransportRequestReader* r);
 const char* transport_req_reader_migration_id(TransportRequestReader* r);
 const char* transport_req_reader_output_path(TransportRequestReader* r);
 const char* transport_req_reader_key(TransportRequestReader* r);
+const char* transport_req_reader_cache_key(TransportRequestReader* r);
 const uint8_t* transport_req_reader_value_ptr(TransportRequestReader* r);
 size_t      transport_req_reader_value_len(TransportRequestReader* r);
 const char* transport_req_reader_prefix(TransportRequestReader* r);

@@ -51,6 +51,8 @@ struct Request {
     dumpRead    @25 :DumpReadBody;
     create      @26 :CreateBody;
     storeStats  @27 :Void;
+    kvPutFromCache @28 :KvCacheRefBody;
+    kvGetToCache   @29 :KvKeyBody;
   }
 
   struct CreateBody    { storeType @0 :StoreType; }
@@ -59,6 +61,7 @@ struct Request {
   struct ArchiveBody   { outputPath @0 :Text; }
   struct KvPutBody     { key @0 :Text; value @1 :Data; }
   struct KvKeyBody     { key @0 :Text; }
+  struct KvCacheRefBody { key @0 :Text; cacheKey @1 :Text; }
   struct KvListBody    { prefix @0 :Text; }
   struct FilePutBody   { key @0 :Text; data @1 :Data; }
   struct FileKeyBody   { key @0 :Text; }

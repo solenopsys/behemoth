@@ -20,6 +20,7 @@
 const std = @import("std");
 
 const gpa = std.heap.c_allocator;
+var cache_key_counter = std.atomic.Value(u64).init(0);
 
 /// pthread mutex — same rationale as lib.zig (works in every consumer build).
 const Mutex = struct {
@@ -46,31 +47,37 @@ const SpaceMap = std.StringHashMap(*Bucket);
 const PoolEntry = struct {
     kv: SpaceMap,
     files: SpaceMap,
+    cache: Bucket,
 
     fn create() !*PoolEntry {
         const entry = try gpa.create(PoolEntry);
-        entry.* = .{ .kv = SpaceMap.init(gpa), .files = SpaceMap.init(gpa) };
+        entry.* = .{ .kv = SpaceMap.init(gpa), .files = SpaceMap.init(gpa), .cache = Bucket.init(gpa) };
         return entry;
     }
 
     fn destroy(self: *PoolEntry) void {
         deinitSpace(&self.kv);
         deinitSpace(&self.files);
+        deinitBucket(&self.cache);
         gpa.destroy(self);
     }
 };
+
+fn deinitBucket(bucket: *Bucket) void {
+    var it = bucket.iterator();
+    while (it.next()) |kv| {
+        gpa.free(kv.key_ptr.*);
+        gpa.free(kv.value_ptr.*);
+    }
+    bucket.deinit();
+}
 
 fn deinitSpace(space: *SpaceMap) void {
     var it = space.iterator();
     while (it.next()) |entry| {
         gpa.free(entry.key_ptr.*);
-        var bucket = entry.value_ptr.*;
-        var bit = bucket.iterator();
-        while (bit.next()) |kv| {
-            gpa.free(kv.key_ptr.*);
-            gpa.free(kv.value_ptr.*);
-        }
-        bucket.deinit();
+        const bucket = entry.value_ptr.*;
+        deinitBucket(bucket);
         gpa.destroy(bucket);
     }
     space.deinit();
@@ -153,7 +160,9 @@ const Op = enum {
     exec_sql,
     query_sql,
     kv_put,
+    kv_put_from_cache,
     kv_get,
+    kv_get_to_cache,
     kv_delete,
     kv_list,
     file_put,
@@ -241,6 +250,31 @@ fn keyLessThan(_: void, a: [:0]u8, b: [:0]u8) bool {
     return std.mem.order(u8, a, b) == .lt;
 }
 
+fn makeCacheKey() ![]u8 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.MONOTONIC, &ts);
+    const nanos: u128 = @as(u128, @intCast(ts.sec)) * std.time.ns_per_s + @as(u128, @intCast(ts.nsec));
+    const n = cache_key_counter.fetchAdd(1, .monotonic);
+    return std.fmt.allocPrint(gpa, "transport-mock:kvs:{x}:{x}", .{ nanos, n });
+}
+
+fn putOwned(bucket: *Bucket, key: []const u8, owned_value: []u8) !void {
+    const gop = bucket.getOrPut(key) catch |err| {
+        gpa.free(owned_value);
+        return err;
+    };
+    if (gop.found_existing) {
+        gpa.free(gop.value_ptr.*);
+    } else {
+        gop.key_ptr.* = gpa.dupe(u8, key) catch {
+            _ = bucket.remove(key);
+            gpa.free(owned_value);
+            return error.OutOfMemory;
+        };
+    }
+    gop.value_ptr.* = owned_value;
+}
+
 /// Execute a request against one pool entry. Caller holds the pool mutex.
 fn execute(entry: *PoolEntry, req: *Request) ?*Response {
     const resp = Response.create() orelse return null;
@@ -258,20 +292,15 @@ fn execute(entry: *PoolEntry, req: *Request) ?*Response {
             const space = if (req.op == .kv_put) &entry.kv else &entry.files;
             const bucket = (bucketFor(space, req.namespace, req.store, true) catch return resp.fail("oom")) orelse unreachable;
             const value = gpa.dupe(u8, req.value) catch return resp.fail("oom");
-            const gop = bucket.getOrPut(req.key) catch {
-                gpa.free(value);
-                return resp.fail("oom");
-            };
-            if (gop.found_existing) {
-                gpa.free(gop.value_ptr.*);
-            } else {
-                gop.key_ptr.* = gpa.dupe(u8, req.key) catch {
-                    _ = bucket.remove(req.key);
-                    gpa.free(value);
-                    return resp.fail("oom");
-                };
-            }
-            gop.value_ptr.* = value;
+            putOwned(bucket, req.key, value) catch return resp.fail("oom");
+            resp.affected = 1;
+        },
+
+        .kv_put_from_cache => {
+            const cached = entry.cache.get(req.value) orelse return resp.fail("cache key not found");
+            const bucket = (bucketFor(&entry.kv, req.namespace, req.store, true) catch return resp.fail("oom")) orelse unreachable;
+            const value = gpa.dupe(u8, cached) catch return resp.fail("oom");
+            putOwned(bucket, req.key, value) catch return resp.fail("oom");
             resp.affected = 1;
         },
 
@@ -282,6 +311,20 @@ fn execute(entry: *PoolEntry, req: *Request) ?*Response {
                 if (b.get(req.key)) |value| {
                     resp.found = true;
                     resp.data = gpa.dupe(u8, value) catch return resp.fail("oom");
+                }
+            }
+        },
+
+        .kv_get_to_cache => {
+            const bucket = bucketFor(&entry.kv, req.namespace, req.store, false) catch return resp.fail("oom");
+            if (bucket) |b| {
+                if (b.get(req.key)) |value| {
+                    const cache_key = makeCacheKey() catch return resp.fail("oom");
+                    errdefer gpa.free(cache_key);
+                    const cached_value = gpa.dupe(u8, value) catch return resp.fail("oom");
+                    putOwned(&entry.cache, cache_key, cached_value) catch return resp.fail("oom");
+                    resp.found = true;
+                    resp.data = cache_key;
                 }
             }
         },
@@ -433,11 +476,26 @@ pub export fn transport_req_kv_put(ms: ?[*:0]const u8, store: ?[*:0]const u8, ke
     return Request.create(.kv_put, std.mem.span(ms_z), std.mem.span(store_z), std.mem.span(key_z), data);
 }
 
+pub export fn transport_req_kv_put_from_cache(ms: ?[*:0]const u8, store: ?[*:0]const u8, key: ?[*:0]const u8, cache_key: ?[*:0]const u8) ?*Request {
+    const ms_z = ms orelse return null;
+    const store_z = store orelse return null;
+    const key_z = key orelse return null;
+    const cache_key_z = cache_key orelse return null;
+    return Request.create(.kv_put_from_cache, std.mem.span(ms_z), std.mem.span(store_z), std.mem.span(key_z), std.mem.span(cache_key_z));
+}
+
 pub export fn transport_req_kv_get(ms: ?[*:0]const u8, store: ?[*:0]const u8, key: ?[*:0]const u8) ?*Request {
     const ms_z = ms orelse return null;
     const store_z = store orelse return null;
     const key_z = key orelse return null;
     return Request.create(.kv_get, std.mem.span(ms_z), std.mem.span(store_z), std.mem.span(key_z), "");
+}
+
+pub export fn transport_req_kv_get_to_cache(ms: ?[*:0]const u8, store: ?[*:0]const u8, key: ?[*:0]const u8) ?*Request {
+    const ms_z = ms orelse return null;
+    const store_z = store orelse return null;
+    const key_z = key orelse return null;
+    return Request.create(.kv_get_to_cache, std.mem.span(ms_z), std.mem.span(store_z), std.mem.span(key_z), "");
 }
 
 pub export fn transport_req_kv_delete(ms: ?[*:0]const u8, store: ?[*:0]const u8, key: ?[*:0]const u8) ?*Request {
