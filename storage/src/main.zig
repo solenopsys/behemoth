@@ -3,10 +3,12 @@ const posix_compat = @import("posix_compat.zig");
 const fs_compat = @import("fs_compat.zig");
 const commands = @import("commands.zig");
 const manifest_mod = @import("manifest.zig");
+const valkey_mod = @import("valkey.zig");
 const build_options = @import("build_options");
 const StoreType = manifest_mod.StoreType;
 const Telemetry = @import("telemetry.zig").Telemetry;
 const StorageCommands = commands.StorageCommands;
+const ValkeyConfig = valkey_mod.Config;
 const with_transport = build_options.with_transport;
 const c = if (with_transport) @cImport(@cInclude("transport.h")) else struct {};
 const server = if (with_transport) @import("server.zig") else struct {
@@ -14,7 +16,7 @@ const server = if (with_transport) @import("server.zig") else struct {
         unix: []const u8,
         tcp: struct { host: []const u8, port: u16 },
     };
-    pub fn start(_: std.mem.Allocator, _: []const u8, _: BindConfig) !void {
+    pub fn start(_: std.mem.Allocator, _: []const u8, _: BindConfig, _: ValkeyConfig) !void {
         return error.TransportDisabled;
     }
 };
@@ -201,7 +203,9 @@ pub fn main(init: std.process.Init) !void {
             .unix => |p| allocator.free(p),
             .tcp => |t| allocator.free(t.host),
         };
-        try server.start(allocator, data_dir, bind_cfg);
+        const valkey_cfg = try getValkeyConfig(allocator, args);
+        defer if (valkey_cfg.enabled) allocator.free(valkey_cfg.host);
+        try server.start(allocator, data_dir, bind_cfg, valkey_cfg);
         return;
     }
     if (std.mem.eql(u8, cmd, "health")) {
@@ -346,6 +350,26 @@ fn getBindConfig(allocator: std.mem.Allocator, args: []const []const u8, data_di
     return .{ .unix = try std.fmt.allocPrint(allocator, "{s}/storage.sock", .{data_dir}) };
 }
 
+fn getValkeyConfig(allocator: std.mem.Allocator, args: []const []const u8) !ValkeyConfig {
+    for (args, 0..) |arg, i| {
+        if (std.mem.eql(u8, arg, "--no-valkey")) {
+            return .{ .enabled = false, .host = "", .port = 0 };
+        }
+        if (std.mem.eql(u8, arg, "--valkey") and i + 1 < args.len) {
+            const addr = args[i + 1];
+            const colon = std.mem.lastIndexOf(u8, addr, ":") orelse return error.InvalidValkeyAddress;
+            const host = try allocator.dupe(u8, addr[0..colon]);
+            const port = std.fmt.parseUnsigned(u16, addr[colon + 1 ..], 10) catch return error.InvalidValkeyPort;
+            return .{ .enabled = true, .host = host, .port = port };
+        }
+    }
+    return .{
+        .enabled = true,
+        .host = try allocator.dupe(u8, "127.0.0.1"),
+        .port = 6379,
+    };
+}
+
 fn getHealthTimeoutMs(args: []const []const u8) !u32 {
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, arg, "--timeout-ms") and i + 1 < args.len) {
@@ -363,11 +387,11 @@ fn printUsage() void {
             \\storage - native storage engine
             \\
             \\usage: storage <command> [args...] [--data-dir <path>]
-            \\       storage start [--data-dir <path>] [--socket <path>|--tcp <host>:<port>]
+            \\       storage start [--data-dir <path>] [--socket <path>|--tcp <host>:<port>] [--valkey <host>:<port>|--no-valkey]
             \\       storage health [--socket <path>|--tcp <host>:<port>] [--timeout-ms <ms>]
             \\
             \\commands:
-            \\  start                                  (unix socket json server)
+            \\  start                                  (transport server + embedded valkey)
             \\  health                                 (transport ping probe)
             \\  open <ms> <store> <SQL|KEY_VALUE|COLUMN|VECTOR|FILES|GRAPH>
             \\  close <ms> <store>

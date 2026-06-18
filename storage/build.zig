@@ -5,12 +5,19 @@ const build_utils = @import("build_utils.zig");
 
 const sqlite_dir = "../../../../../../solenopsys/detonation/wrapers/sqlite/vendor/sqlite";
 const sqlite_src = sqlite_dir ++ "/sqlite3.c";
+const valkey_vendor_dir = "../../wrapers/valkey/vendor/valkey";
+const valkey_wrapper_dir = "../../wrapers/valkey";
 
 fn supportsTransport(target: Build.ResolvedTarget) bool {
     return target.result.os.tag == .linux;
 }
 
 const transport_vendor_src = "../transport/vendor/capnproto/c++/src";
+
+const TargetParts = struct {
+    arch: []const u8,
+    libc: []const u8,
+};
 
 const kj_sources = [_][]const u8{
     transport_vendor_src ++ "/kj/array.c++",
@@ -54,6 +61,95 @@ const capnp_sources = [_][]const u8{
     transport_vendor_src ++ "/capnp/serialize-packed.c++",
     transport_vendor_src ++ "/capnp/stringify.c++",
 };
+
+fn getValkeyTargetParts(target: Build.ResolvedTarget) TargetParts {
+    if (target.result.os.tag != .linux) {
+        std.debug.panic("valkey wrapper supports linux targets only, got {s}", .{
+            @tagName(target.result.os.tag),
+        });
+    }
+
+    const arch = switch (target.result.cpu.arch) {
+        .x86_64 => "x86_64",
+        .aarch64 => "aarch64",
+        else => std.debug.panic("unsupported cpu arch for valkey: {s}", .{
+            @tagName(target.result.cpu.arch),
+        }),
+    };
+
+    const libc = switch (target.result.abi) {
+        .gnu, .gnueabi, .gnueabihf => "gnu",
+        .musl, .musleabi, .musleabihf => "musl",
+        else => std.debug.panic("unsupported abi for valkey: {s}", .{
+            @tagName(target.result.abi),
+        }),
+    };
+
+    return .{ .arch = arch, .libc = libc };
+}
+
+fn getValkeyOptimize(optimize: OptimizeMode) []const u8 {
+    return switch (optimize) {
+        .Debug => "-O0",
+        .ReleaseSafe => "-O2",
+        .ReleaseFast => "-O3",
+        .ReleaseSmall => "-Os",
+    };
+}
+
+fn getValkeyTargetTriple(b: *Build, target: Build.ResolvedTarget) []const u8 {
+    const target_parts = getValkeyTargetParts(target);
+    return b.fmt("{s}-linux-{s}", .{ target_parts.arch, target_parts.libc });
+}
+
+fn addValkeyWrapperBuild(
+    b: *Build,
+    target: Build.ResolvedTarget,
+    optimize: OptimizeMode,
+    install_dir: []const u8,
+) *Build.Step.Run {
+    const target_str = build_utils.getTargetString(target);
+    const target_triple = getValkeyTargetTriple(b, target);
+    const build_cmd = b.addSystemCommand(&[_][]const u8{
+        b.graph.zig_exe,
+        "build",
+        b.fmt("-Dtarget={s}", .{target_triple}),
+        b.fmt("-Doptimize={s}", .{@tagName(optimize)}),
+        "--prefix",
+        install_dir,
+    });
+    build_cmd.setCwd(b.path(valkey_wrapper_dir));
+    build_cmd.setName(b.fmt("build valkey wrapper ({s})", .{target_str}));
+    return build_cmd;
+}
+
+fn linkValkeyWrapper(
+    b: *Build,
+    compile: *Build.Step.Compile,
+    target: Build.ResolvedTarget,
+    optimize: OptimizeMode,
+    install_name: []const u8,
+) void {
+    const target_str = build_utils.getTargetString(target);
+    const install_dir = b.fmt("../../behemoth/storage/.zig-cache/valkey-wrapper/{s}", .{target_str});
+    const lib_dir = b.fmt(".zig-cache/valkey-wrapper/{s}/lib", .{target_str});
+    const build_cmd = addValkeyWrapperBuild(b, target, optimize, install_dir);
+
+    compile.step.dependOn(&build_cmd.step);
+    compile.root_module.addIncludePath(b.path("../../wrapers/valkey/include"));
+    compile.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
+    compile.root_module.addRPathSpecial("$ORIGIN/../lib");
+    compile.root_module.addRPathSpecial("$ORIGIN/lib");
+    compile.root_module.linkSystemLibrary("valkey", .{});
+
+    const install_lib = b.addInstallFileWithDir(
+        .{ .cwd_relative = b.fmt("{s}/libvalkey.so", .{lib_dir}) },
+        .lib,
+        install_name,
+    );
+    install_lib.step.dependOn(&build_cmd.step);
+    b.getInstallStep().dependOn(&install_lib.step);
+}
 
 fn buildMdbx(b: *Build, target: Build.ResolvedTarget, optimize: OptimizeMode) *Build.Step.Compile {
     const target_str = build_utils.getTargetString(target);
@@ -193,6 +289,7 @@ fn addStorageExecutable(
     optimize: OptimizeMode,
     name: []const u8,
     with_transport: bool,
+    valkey_install_name: []const u8,
 ) *Build.Step.Compile {
     const mdbx = buildMdbx(b, target, optimize);
     const sqlite_vec = addSqliteVecObj(b, target, optimize);
@@ -288,6 +385,7 @@ fn addStorageExecutable(
     }
 
     exe.root_module.linkSystemLibrary("c", .{});
+    linkValkeyWrapper(b, exe, target, optimize, valkey_install_name);
 
     return exe;
 }
@@ -310,14 +408,16 @@ pub fn build(b: *Build) void {
             const with_transport = transport_override orelse supportsTransport(resolved_target);
             const target_str = build_utils.getTargetString(resolved_target);
             const exe_name = build_utils.getExeName(std.heap.page_allocator, "storage", target_str);
-            const exe = addStorageExecutable(b, resolved_target, optimize, exe_name, with_transport);
+            const valkey_name = build_utils.getLibName(std.heap.page_allocator, "valkey", target_str);
+            const valkey_install_name = b.fmt("lib{s}.so", .{valkey_name});
+            const exe = addStorageExecutable(b, resolved_target, optimize, exe_name, with_transport, valkey_install_name);
             b.installArtifact(exe);
         }
         return;
     }
 
     const with_transport = transport_override orelse supportsTransport(target);
-    const exe = addStorageExecutable(b, target, optimize, "storage", with_transport);
+    const exe = addStorageExecutable(b, target, optimize, "storage", with_transport, "libvalkey.so");
     b.installArtifact(exe);
 
     const mdbx = buildMdbx(b, target, optimize);
@@ -365,6 +465,7 @@ pub fn build(b: *Build) void {
         .optimize = optimize,
     }));
     tests.root_module.linkSystemLibrary("c", .{});
+    tests.root_module.addIncludePath(b.path("../../wrapers/valkey/include"));
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");

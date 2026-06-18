@@ -6,6 +6,7 @@ const cmds = @import("commands.zig");
 const mfst = @import("manifest.zig");
 const tel_mod = @import("telemetry.zig");
 const threads_mod = @import("threads.zig");
+const valkey_mod = @import("valkey.zig");
 
 const StorageCommands = cmds.StorageCommands;
 const StoreType = mfst.StoreType;
@@ -14,6 +15,7 @@ const ThreadPool = threads_mod.ThreadPool;
 const WorkItem = threads_mod.WorkItem;
 const KvEngine = @import("engines/kv.zig").KvEngine;
 const Allocator = std.mem.Allocator;
+const ValkeyConfig = valkey_mod.Config;
 
 // C API from capnp_wrap.cpp (compiled directly into the exe via build.zig)
 const c = @cImport(@cInclude("transport.h"));
@@ -85,10 +87,13 @@ fn setTcpNoDelay(fd: std.posix.fd_t) !void {
     );
 }
 
-pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void {
+pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey_cfg: ValkeyConfig) !void {
     try fs_compat.cwd().makePath(data_dir);
     installSignalHandlers();
     shutdown_requested.store(false, .seq_cst);
+
+    try valkey_mod.start(allocator, data_dir, valkey_cfg);
+    defer valkey_mod.stop(valkey_cfg);
 
     const server_fd: std.posix.fd_t = switch (cfg) {
         .unix => |path| try createUnixServer(path),
@@ -116,6 +121,9 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig) !void 
     switch (cfg) {
         .unix => |path| std.debug.print("storage server listening on unix:{s}\n", .{path}),
         .tcp => |t| std.debug.print("storage server listening on tcp:{s}:{d}\n", .{ t.host, t.port }),
+    }
+    if (valkey_cfg.enabled) {
+        std.debug.print("storage valkey listening on tcp:{s}:{d}\n", .{ valkey_cfg.host, valkey_cfg.port });
     }
 
     active_clients.store(0, .seq_cst);
@@ -639,7 +647,7 @@ fn dispatch(
         .exec_fn = StoreOp.execute,
     };
 
-    pool.getWorker(store_type.?).submit(&item);
+    pool.getWorkerForStore(store_type.?, store_key).submit(&item);
     item.done.wait();
 
     if (op.op_err) |e| return e;
