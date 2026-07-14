@@ -11,6 +11,7 @@ const StoreType = manifest_mod.StoreType;
 const Telemetry = telemetry_mod.Telemetry;
 const ThreadPool = threads_mod.ThreadPool;
 const WorkItem = threads_mod.WorkItem;
+const KvEngine = @import("engines/kv.zig").KvEngine;
 
 const Iterations = 120;
 
@@ -53,6 +54,16 @@ fn prepareDataDir(tmp: *std.testing.TmpDir, path_buf: []u8) ![]const u8 {
     try tmp.dir.createDir(std.testing.io, "data", .default_dir);
     const len = try tmp.dir.realPathFile(std.testing.io, "data", path_buf);
     return path_buf[0..len];
+}
+
+fn fillValue(buf: []u8, seed: usize) void {
+    for (buf, 0..) |*b, i| {
+        b.* = @intCast((seed + i) % 251);
+    }
+}
+
+fn expectPathMissing(path: []const u8) !void {
+    try std.testing.expectError(error.FileNotFound, fs_compat.cwd().access(path, .{}));
 }
 
 test "open is idempotent and store can close/reopen" {
@@ -138,6 +149,215 @@ test "error in one store type does not break others" {
     const sql_data = try commands.querySql("sql-ms/sql", "SELECT COUNT(*) AS count FROM t", &tel);
     defer std.testing.allocator.free(sql_data);
     try std.testing.expect(std.mem.indexOf(u8, sql_data, "\"count\":1") != null);
+}
+
+test "kv churn compact and reopen preserves live values" {
+    fs_compat.setIo(std.testing.io);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
+    const data_dir_z = try std.testing.allocator.dupeZ(u8, data_dir);
+    defer std.testing.allocator.free(data_dir_z);
+
+    var kv = KvEngine.init(std.testing.allocator, data_dir_z);
+    try kv.open();
+    defer kv.close();
+
+    var tel = Telemetry.begin();
+    var value: [4096]u8 = undefined;
+    var expected: [4096]u8 = undefined;
+
+    for (0..160) |i| {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "churn-key-{d}", .{i});
+        fillValue(&value, i);
+        try kv.put(key, &value, &tel);
+    }
+
+    for (0..160) |i| {
+        if (i % 3 != 0) continue;
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "churn-key-{d}", .{i});
+        try kv.delete(key, &tel);
+    }
+
+    for (0..80) |i| {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "replacement-key-{d}", .{i});
+        fillValue(&value, i + 10_000);
+        try kv.put(key, &value, &tel);
+    }
+
+    try kv.flush();
+    try kv.compact();
+
+    const bak_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/mdbx.dat.bak", .{data_dir});
+    defer std.testing.allocator.free(bak_path);
+    try expectPathMissing(bak_path);
+
+    kv.close();
+
+    try kv.open();
+    for (0..160) |i| {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "churn-key-{d}", .{i});
+        const got = try kv.get(key, &tel);
+        if (i % 3 == 0) {
+            try std.testing.expect(got == null);
+            continue;
+        }
+        try std.testing.expect(got != null);
+        defer std.testing.allocator.free(got.?);
+        fillValue(&expected, i);
+        try std.testing.expectEqualSlices(u8, &expected, got.?);
+    }
+
+    for (0..80) |i| {
+        var key_buf: [32]u8 = undefined;
+        const key = try std.fmt.bufPrint(&key_buf, "replacement-key-{d}", .{i});
+        const got = try kv.get(key, &tel);
+        try std.testing.expect(got != null);
+        defer std.testing.allocator.free(got.?);
+        fillValue(&expected, i + 10_000);
+        try std.testing.expectEqualSlices(u8, &expected, got.?);
+    }
+}
+
+test "kv open recovers interrupted compact backup when data file is missing" {
+    fs_compat.setIo(std.testing.io);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
+    const data_dir_z = try std.testing.allocator.dupeZ(u8, data_dir);
+    defer std.testing.allocator.free(data_dir_z);
+
+    var kv = KvEngine.init(std.testing.allocator, data_dir_z);
+    try kv.open();
+
+    var tel = Telemetry.begin();
+    try kv.put("sentinel", "survives-interrupted-compact", &tel);
+    try kv.flush();
+    kv.close();
+
+    const dat_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/mdbx.dat", .{data_dir});
+    defer std.testing.allocator.free(dat_path);
+    const bak_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/mdbx.dat.bak", .{data_dir});
+    defer std.testing.allocator.free(bak_path);
+
+    try std.Io.Dir.renameAbsolute(dat_path, bak_path, std.testing.io);
+    try expectPathMissing(dat_path);
+
+    try kv.open();
+    defer kv.close();
+
+    const got = try kv.get("sentinel", &tel);
+    try std.testing.expect(got != null);
+    defer std.testing.allocator.free(got.?);
+    try std.testing.expectEqualStrings("survives-interrupted-compact", got.?);
+    try expectPathMissing(bak_path);
+}
+
+const ConcurrentKvCtx = struct {
+    engine: *KvEngine,
+    id: usize,
+    failed: *std.atomic.Value(bool),
+};
+
+fn concurrentKvEngineWorker(ctx: *ConcurrentKvCtx) void {
+    var tel = Telemetry.begin();
+    var value: [2048]u8 = undefined;
+    var expected: [2048]u8 = undefined;
+
+    for (0..700) |i| {
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "worker-{d}-key-{d}", .{ ctx.id, i % 160 }) catch {
+            ctx.failed.store(true, .seq_cst);
+            return;
+        };
+
+        fillValue(&value, ctx.id * 10_000 + i);
+        ctx.engine.put(key, &value, &tel) catch {
+            ctx.failed.store(true, .seq_cst);
+            return;
+        };
+
+        const got = ctx.engine.get(key, &tel) catch {
+            ctx.failed.store(true, .seq_cst);
+            return;
+        };
+        if (got) |data| {
+            defer std.testing.allocator.free(data);
+            fillValue(&expected, ctx.id * 10_000 + i);
+            if (!std.mem.eql(u8, data, &expected)) {
+                ctx.failed.store(true, .seq_cst);
+                return;
+            }
+        } else {
+            ctx.failed.store(true, .seq_cst);
+            return;
+        }
+
+        if (i % 5 == 0) {
+            var old_key_buf: [64]u8 = undefined;
+            const old_key = std.fmt.bufPrint(&old_key_buf, "worker-{d}-key-{d}", .{ ctx.id, (i + 37) % 160 }) catch {
+                ctx.failed.store(true, .seq_cst);
+                return;
+            };
+            ctx.engine.delete(old_key, &tel) catch |err| switch (err) {
+                error.NotFound => {},
+                else => {
+                    ctx.failed.store(true, .seq_cst);
+                    return;
+                },
+            };
+        }
+    }
+}
+
+test "kv engines survive concurrent churn across stores" {
+    fs_compat.setIo(std.testing.io);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const data_dir = try prepareDataDir(&tmp, &path_buf);
+
+    const WorkerCount = 8;
+    var engines: [WorkerCount]KvEngine = undefined;
+    var paths: [WorkerCount][:0]u8 = undefined;
+    var opened: usize = 0;
+    var allocated_paths: usize = 0;
+    defer {
+        for (0..opened) |i| engines[i].close();
+        for (0..allocated_paths) |i| std.testing.allocator.free(paths[i]);
+    }
+
+    for (0..WorkerCount) |i| {
+        const path = try std.fmt.allocPrint(std.testing.allocator, "{s}/kv-{d}", .{ data_dir, i });
+        defer std.testing.allocator.free(path);
+        try fs_compat.cwd().makePath(path);
+        paths[i] = try std.testing.allocator.dupeZ(u8, path);
+        allocated_paths += 1;
+        engines[i] = KvEngine.init(std.testing.allocator, paths[i]);
+        try engines[i].open();
+        opened += 1;
+    }
+
+    var failed = std.atomic.Value(bool).init(false);
+    var ctxs: [WorkerCount]ConcurrentKvCtx = undefined;
+    var threads: [WorkerCount]std.Thread = undefined;
+
+    for (0..WorkerCount) |i| {
+        ctxs[i] = .{ .engine = &engines[i], .id = i, .failed = &failed };
+        threads[i] = try std.Thread.spawn(.{}, concurrentKvEngineWorker, .{&ctxs[i]});
+    }
+    for (&threads) |thread| thread.join();
+
+    try std.testing.expect(!failed.load(.seq_cst));
 }
 
 fn sqlWorker(store_key: []const u8, table_name: []const u8, ctx: *SqlCtx) void {

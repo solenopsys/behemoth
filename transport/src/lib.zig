@@ -1,7 +1,5 @@
 const std = @import("std");
 const socket = @import("socket.zig");
-const codec = @import("codec.zig");
-const posix_compat = @import("posix_compat.zig");
 
 // Import the C header — gives us all transport_req_* / transport_resp_* symbols
 // that are implemented in capnp_wrap.cpp.
@@ -322,41 +320,37 @@ pub export fn transport_pool_request(pool: ?*TransportPool, key: ?[*:0]const u8,
     return p.request(key, req);
 }
 
-// ── Unix socket transport (added on top of capnp encode/decode) ───────────────
+// ── ZeroMQ transport (IPC and TCP carry one Cap'n Proto buffer per message) ──
 
-/// Connect to a storage Unix socket.  Returns fd or -1 on error.
+/// Connect to a storage IPC endpoint. Returns an opaque handle or -1 on error.
 pub export fn transport_connect(path: [*:0]const u8) i32 {
-    const fd = socket.connect(path) catch return -1;
-    return @intCast(fd);
+    return socket.connectUnix(path) catch -1;
 }
 
-/// Set per-socket send/receive timeout in milliseconds.
+/// Set per-ZMQ-socket send/receive timeout in milliseconds.
 /// Returns 0 on success, -1 on error.
 pub export fn transport_set_timeout_ms(fd: i32, timeout_ms: u32) i32 {
-    socket.setOperationTimeout(@intCast(fd), timeout_ms) catch return -1;
+    socket.setOperationTimeout(fd, timeout_ms) catch return -1;
     return 0;
 }
 
-/// Create and listen on a Unix socket.  Returns server fd or -1 on error.
+/// Bind a storage IPC endpoint. Returns an opaque server handle or -1 on error.
 pub export fn transport_listen(path: [*:0]const u8) i32 {
-    const fd = socket.listen(path) catch return -1;
-    return @intCast(fd);
+    return socket.listenUnix(path) catch -1;
 }
 
-/// Connect to a TCP server at host:port.  Returns fd or -1 on error.
+/// Connect to a TCP endpoint at host:port. Returns an opaque handle or -1 on error.
 pub export fn transport_connect_tcp(host: [*:0]const u8, port: u16) i32 {
-    const fd = socket.connectTcp(host, port) catch return -1;
-    return @intCast(fd);
+    return socket.connectTcp(host, port) catch -1;
 }
 
-/// Create a TCP server socket bound to host:port.  Returns fd or -1 on error.
+/// Bind a TCP endpoint at host:port. Returns an opaque server handle or -1 on error.
 pub export fn transport_listen_tcp(host: [*:0]const u8, port: u16) i32 {
-    const fd = socket.listenTcp(host, port) catch return -1;
-    return @intCast(fd);
+    return socket.listenTcp(host, port) catch return -1;
 }
 
 /// Config-based connect: selects unix or tcp based on cfg.kind.
-/// Returns fd or -1 on error.
+/// Returns an opaque handle or -1 on error.
 pub export fn transport_connect_cfg(cfg: *const TransportConfig) i32 {
     return switch (cfg.kind) {
         .unix => transport_connect(cfg.addr),
@@ -373,21 +367,17 @@ pub export fn transport_listen_cfg(cfg: *const TransportConfig) i32 {
     };
 }
 
-/// Accept next client (blocking).  Returns client fd, -1 on would-block, -2 on error.
+/// ZeroMQ accepts peers internally; returns the listener handle or -1 on error.
 pub export fn transport_accept(server_fd: i32) i32 {
-    const client_fd = posix_compat.accept(@intCast(server_fd), null, null, 0) catch |err| switch (err) {
-        error.WouldBlock => return -1,
-        else => return -2,
-    };
-    return @intCast(client_fd);
+    return socket.accept(server_fd) catch -1;
 }
 
-/// Close a file descriptor.
+/// Close an opaque ZeroMQ handle.
 pub export fn transport_close(fd: i32) void {
-    posix_compat.close(@intCast(fd));
+    socket.close(fd);
 }
 
-/// Encode a request with capnp and send it over fd (4-byte LE length prefix + body).
+/// Encode a request with Cap'n Proto and send it as a single ZeroMQ message.
 /// Returns 0 on success, -1 on encode error, -2 on send error.
 pub export fn transport_send_req(fd: i32, req: ?*anyopaque) i32 {
     var out_buf: ?[*]u8 = null;
@@ -400,16 +390,16 @@ pub export fn transport_send_req(fd: i32, req: ?*anyopaque) i32 {
     if (rc != 0) return -1;
     defer c.transport_free_buf(out_buf, out_len);
 
-    codec.sendMessage(@intCast(fd), out_buf.?[0..out_len]) catch return -2;
+    socket.sendMessage(fd, out_buf.?[0..out_len]) catch return -2;
     return 0;
 }
 
-/// Receive a capnp response from fd.
+/// Receive one Cap'n Proto response from ZeroMQ.
 /// Returns a TransportResponse* (opaque) or null on error.
 /// Caller must free with transport_resp_free().
 pub export fn transport_recv_resp(fd: i32) ?*anyopaque {
     const allocator = std.heap.c_allocator;
-    const msg = codec.recvMessage(@intCast(fd), allocator) catch return null;
+    const msg = socket.recvMessage(fd, allocator) catch return null;
     defer allocator.free(msg);
     return @ptrCast(c.transport_resp_decode(msg.ptr, msg.len));
 }

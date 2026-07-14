@@ -4,13 +4,23 @@ const Allocator = std.mem.Allocator;
 const Telemetry = @import("../telemetry.zig").Telemetry;
 
 pub const FilesEngine = struct {
+    pub const Config = struct {
+        max_read_bytes: usize = 256 * 1024 * 1024,
+    };
+
     base_path: []const u8,
     allocator: Allocator,
+    config: Config,
 
     pub fn init(allocator: Allocator, base_path: []const u8) FilesEngine {
+        return initWithConfig(allocator, base_path, .{});
+    }
+
+    pub fn initWithConfig(allocator: Allocator, base_path: []const u8, config: Config) FilesEngine {
         return .{
             .base_path = base_path,
             .allocator = allocator,
+            .config = config,
         };
     }
 
@@ -59,7 +69,7 @@ pub const FilesEngine = struct {
         };
         defer file.close();
 
-        const data = try file.readToEndAlloc(self.allocator, 256 * 1024 * 1024);
+        const data = try file.readToEndAlloc(self.allocator, self.config.max_read_bytes);
         tel.addRead(data.len);
         return data;
     }

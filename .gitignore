@@ -1,4 +1,9 @@
-zig-out
-.zig-cache
-zig-cache
-node_modules
+# Generated build and dependency output
+zig-out/
+.zig-cache/
+zig-cache/
+zig-pkg/
+build/
+builds/
+dist/
+node_modules/

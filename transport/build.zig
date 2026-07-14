@@ -69,6 +69,7 @@ fn addTransportLib(
     optimize: std.builtin.OptimizeMode,
     name: []const u8,
 ) *std.Build.Step.Compile {
+    const zimq = b.dependency("zimq", .{ .target = target, .optimize = optimize });
     const lib = b.addLibrary(.{
         .name = name,
         .linkage = .dynamic,
@@ -113,6 +114,9 @@ fn addTransportLib(
     lib.root_module.addIncludePath(b.path("include"));
     lib.root_module.addIncludePath(b.path("src/generated"));
     lib.root_module.addIncludePath(b.path(vendor_src));
+    lib.root_module.addImport("zimq", zimq.module("zimq"));
+    lib.root_module.linkLibrary(zimq.artifact("zimq"));
+    lib.root_module.addRPathSpecial("$ORIGIN");
 
     lib.root_module.linkSystemLibrary("c++", .{});
     lib.root_module.linkSystemLibrary("c", .{});
@@ -131,6 +135,7 @@ pub fn build(b: *std.Build) void {
             const target_str = getTargetString(resolved_target);
             const lib_name = getLibName(std.heap.page_allocator, "transport", target_str);
             const lib = addTransportLib(b, resolved_target, optimize, lib_name);
+            const zimq = b.dependency("zimq", .{ .target = resolved_target, .optimize = optimize });
             b.installArtifact(lib);
             const so_name = std.fmt.allocPrint(std.heap.page_allocator, "lib{s}.so", .{lib_name}) catch continue;
             const sync = b.addInstallFileWithDir(
@@ -140,12 +145,21 @@ pub fn build(b: *std.Build) void {
             );
             sync.step.dependOn(&lib.step);
             b.getInstallStep().dependOn(&sync.step);
+            const zimq_sync = b.addInstallFileWithDir(
+                zimq.artifact("zimq").getEmittedBin(),
+                .{ .custom = "../../bun-transport/bin-libs" },
+                b.fmt("libzimq-{s}.so", .{target_str}),
+            );
+            zimq_sync.step.dependOn(&zimq.artifact("zimq").step);
+            b.getInstallStep().dependOn(&zimq_sync.step);
         }
         return;
     }
 
     const lib = addTransportLib(b, target, optimize, "transport");
     b.installArtifact(lib);
+    const zimq = b.dependency("zimq", .{ .target = target, .optimize = optimize });
+    b.installArtifact(zimq.artifact("zimq"));
 
     // In-memory mock with the same C ABI — for service tests without storage.
     // `zig build mock` → zig-out/lib/libtransport-mock.so

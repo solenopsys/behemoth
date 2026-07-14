@@ -1,12 +1,13 @@
 const std = @import("std");
-const posix_compat = @import("posix_compat.zig");
 const fs_compat = @import("fs_compat.zig");
 const sync_compat = @import("sync_compat.zig");
+const transport_socket = @import("transport_zmq");
 const cmds = @import("commands.zig");
 const mfst = @import("manifest.zig");
 const tel_mod = @import("telemetry.zig");
 const threads_mod = @import("threads.zig");
 const valkey_mod = @import("valkey.zig");
+const management_mod = @import("management.zig");
 
 const StorageCommands = cmds.StorageCommands;
 const StoreType = mfst.StoreType;
@@ -20,72 +21,53 @@ const ValkeyConfig = valkey_mod.Config;
 // C API from capnp_wrap.cpp (compiled directly into the exe via build.zig)
 const c = @cImport(@cInclude("transport.h"));
 
-// Framing: 4-byte LE length prefix (same as transport/src/codec.zig)
-const max_msg: u32 = 64 * 1024 * 1024;
-
 var shutdown_requested = std.atomic.Value(bool).init(false);
-var active_clients = std.atomic.Value(usize).init(0);
 var cache_key_counter = std.atomic.Value(u64).init(0);
 var stores_rwlock: sync_compat.RwLock = .{};
 var pool: ThreadPool = undefined;
 
-const ClientContext = struct {
-    allocator: Allocator,
-    commands: *StorageCommands,
-    fd: std.posix.fd_t,
-};
+fn storeCmdName(cmd: c_uint) []const u8 {
+    return switch (cmd) {
+        c.REQ_KV_PUT => "kv-put",
+        c.REQ_KV_PUT_FROM_CACHE => "kv-put-from-cache",
+        c.REQ_KV_GET => "kv-get",
+        c.REQ_KV_GET_TO_CACHE => "kv-get-to-cache",
+        c.REQ_KV_DELETE => "kv-delete",
+        c.REQ_KV_LIST => "kv-list",
+        c.REQ_KV_COMPACT => "kv-compact",
+        else => "other",
+    };
+}
 
-/// Transport binding configuration — choose Unix domain socket or TCP.
+fn traceStoreOp(cmd: c_uint) bool {
+    return switch (cmd) {
+        c.REQ_KV_PUT,
+        c.REQ_KV_PUT_FROM_CACHE,
+        c.REQ_KV_GET_TO_CACHE,
+        c.REQ_KV_DELETE,
+        c.REQ_KV_COMPACT,
+        => true,
+        else => false,
+    };
+}
+
+/// Transport binding configuration — choose ZeroMQ IPC or TCP.
 pub const BindConfig = union(enum) {
     unix: []const u8,
     tcp: struct { host: []const u8, port: u16 },
 };
 
-fn createUnixServer(socket_path: []const u8) !std.posix.fd_t {
+fn listenUnix(socket_path: []const u8, allocator: Allocator) !i32 {
     try ensureSocketParent(socket_path);
-    posix_compat.unlink(socket_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    };
-    const fd = try posix_compat.socket(
-        std.posix.AF.UNIX,
-        std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
-        0,
-    );
-    errdefer posix_compat.close(fd);
-    var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
-    addr.family = std.posix.AF.UNIX;
-    if (socket_path.len + 1 > addr.path.len) return error.SocketPathTooLong;
-    @memcpy(addr.path[0..socket_path.len], socket_path);
-    addr.path[socket_path.len] = 0;
-    try posix_compat.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
-    try posix_compat.listen(fd, 128);
-    return fd;
+    const path_z = try allocator.dupeZ(u8, socket_path);
+    defer allocator.free(path_z);
+    return transport_socket.listenUnix(path_z.ptr);
 }
 
-fn createTcpServer(host: []const u8, port: u16) !std.posix.fd_t {
-    const fd = try posix_compat.socket(
-        std.posix.AF.INET,
-        std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK,
-        std.posix.IPPROTO.TCP,
-    );
-    errdefer posix_compat.close(fd);
-    const one: c_int = 1;
-    try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&one));
-    const ip4 = try posix_compat.parseIp4Address(host, port);
-    try posix_compat.bind(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
-    try posix_compat.listen(fd, 128);
-    return fd;
-}
-
-fn setTcpNoDelay(fd: std.posix.fd_t) !void {
-    const one: c_int = 1;
-    try std.posix.setsockopt(
-        fd,
-        std.posix.IPPROTO.TCP,
-        std.posix.TCP.NODELAY,
-        std.mem.asBytes(&one),
-    );
+fn listenTcp(host: []const u8, port: u16, allocator: Allocator) !i32 {
+    const host_z = try allocator.dupeZ(u8, host);
+    defer allocator.free(host_z);
+    return transport_socket.listenTcp(host_z.ptr, port);
 }
 
 pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey_cfg: ValkeyConfig) !void {
@@ -96,19 +78,19 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
     try valkey_mod.start(allocator, data_dir, valkey_cfg);
     defer valkey_mod.stop(valkey_cfg);
 
-    const server_fd: std.posix.fd_t = switch (cfg) {
-        .unix => |path| try createUnixServer(path),
-        .tcp => |t| try createTcpServer(t.host, t.port),
+    const server_handle: i32 = switch (cfg) {
+        .unix => |path| try listenUnix(path, allocator),
+        .tcp => |t| try listenTcp(t.host, t.port, allocator),
     };
-    defer posix_compat.close(server_fd);
-    // Remove unix socket file on exit; nothing to clean up for TCP.
-    const unix_path: ?[]const u8 = switch (cfg) {
-        .unix => |p| p,
-        .tcp => null,
-    };
-    defer if (unix_path) |p| posix_compat.unlink(p) catch {};
+    defer transport_socket.close(server_handle);
 
-    var commands = StorageCommands.init(allocator, data_dir);
+    var management = try management_mod.initFromEnv(allocator);
+    defer if (management) |*controller| controller.deinit();
+    if (management) |*controller| {
+        std.log.info("storage JS management interface loaded from {s}", .{controller.script_path});
+    }
+
+    var commands = StorageCommands.initWithManagement(allocator, data_dir, if (management) |*controller| controller else null);
     defer commands.deinit();
     try autoOpenStores(allocator, &commands, data_dir);
 
@@ -127,116 +109,52 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
         std.debug.print("storage valkey listening on tcp:{s}:{d}\n", .{ valkey_cfg.host, valkey_cfg.port });
     }
 
-    active_clients.store(0, .seq_cst);
-
     while (true) {
         if (shutdown_requested.load(.seq_cst)) {
             std.debug.print("storage signal received, shutting down\n", .{});
             break;
         }
 
-        const client_fd = posix_compat.accept(server_fd, null, null, 0) catch |err| switch (err) {
+        const req_bytes = transport_socket.recvMessage(server_handle, allocator) catch |err| switch (err) {
             error.WouldBlock => {
                 sync_compat.sleep(25 * std.time.ns_per_ms);
                 continue;
             },
             else => return err,
         };
-        if (cfg == .tcp) {
-            try setTcpNoDelay(client_fd);
-        }
-        try setSocketBlocking(client_fd);
-
-        const ctx = try allocator.create(ClientContext);
-        ctx.* = .{
-            .allocator = allocator,
-            .commands = &commands,
-            .fd = client_fd,
-        };
-        _ = active_clients.fetchAdd(1, .seq_cst);
-
-        const thread = std.Thread.spawn(.{}, handleClientThread, .{ctx}) catch |err| {
-            _ = active_clients.fetchSub(1, .seq_cst);
-            allocator.destroy(ctx);
-            posix_compat.close(client_fd);
-            return err;
-        };
-        thread.detach();
-    }
-
-    const wait_step_ms: usize = 25;
-    const max_wait_ms: usize = 2000;
-    var waited_ms: usize = 0;
-    while (active_clients.load(.seq_cst) != 0 and waited_ms < max_wait_ms) : (waited_ms += wait_step_ms) {
-        sync_compat.sleep(wait_step_ms * std.time.ns_per_ms);
-    }
-
-    const clients_left = active_clients.load(.seq_cst);
-    if (clients_left != 0) {
-        std.debug.print("storage shutdown forced with active clients={d}\n", .{clients_left});
-    }
-}
-
-fn setSocketBlocking(fd: std.posix.fd_t) !void {
-    var flags = try posix_compat.fcntl(fd, std.posix.F.GETFL, @as(c_int, 0));
-    flags &= ~@as(c_int, @intCast(@as(usize, 1) << @bitOffsetOf(std.posix.O, "NONBLOCK")));
-    _ = try posix_compat.fcntl(fd, std.posix.F.SETFL, flags);
-}
-
-// ── Client handler ────────────────────────────────────────────────────────────
-
-fn handleClientThread(ctx: *ClientContext) void {
-    const allocator = ctx.allocator;
-    const commands = ctx.commands;
-    const fd = ctx.fd;
-    defer {
-        posix_compat.close(fd);
-        allocator.destroy(ctx);
-        _ = active_clients.fetchSub(1, .seq_cst);
-    }
-
-    const should_shutdown = handleClient(allocator, commands, fd) catch |err| blk: {
-        std.debug.print("storage client error: {s}\n", .{@errorName(err)});
-        break :blk false;
-    };
-    if (should_shutdown) {
-        shutdown_requested.store(true, .seq_cst);
-    }
-}
-
-fn handleClient(allocator: Allocator, commands: *StorageCommands, fd: std.posix.fd_t) !bool {
-    while (true) {
-        const req_bytes = recvMessage(fd, allocator) catch |err| {
-            if (err == error.EndOfStream) return false;
-            return err;
-        };
         defer allocator.free(req_bytes);
-
-        const reader = c.transport_req_reader_decode(req_bytes.ptr, req_bytes.len);
-        if (reader == null) {
-            sendErrorMsg(fd, "invalid capnp message");
-            return false;
-        }
-        defer c.transport_req_reader_free(reader);
-
-        var shutdown = false;
-        const resp = dispatch(allocator, commands, reader, &shutdown) catch |err| blk: {
-            std.debug.print("storage dispatch error: {s}\n", .{@errorName(err)});
-            break :blk encodeError(@errorName(err));
+        const should_shutdown = handleRequest(allocator, &commands, server_handle, req_bytes) catch |err| blk: {
+            std.debug.print("storage request error: {s}\n", .{@errorName(err)});
+            sendErrorMsg(server_handle, "internal storage error");
+            break :blk false;
         };
-        defer if (resp.ptr) |p| c.transport_free_buf(p, resp.len);
-
-        if (resp.ptr) |p| {
-            sendMessage(fd, p[0..resp.len]) catch |err| {
-                std.debug.print("storage send error: {s}\n", .{@errorName(err)});
-                return false;
-            };
-        } else {
-            // encodeError failed — send a hardcoded fallback so the client doesn't hang
-            sendErrorMsg(fd, "internal storage error");
-        }
-        if (shutdown) return true;
+        if (should_shutdown) shutdown_requested.store(true, .seq_cst);
     }
+}
+
+// ── ZeroMQ request handler ───────────────────────────────────────────────────
+
+fn handleRequest(allocator: Allocator, commands: *StorageCommands, handle: i32, req_bytes: []const u8) !bool {
+    const reader = c.transport_req_reader_decode(req_bytes.ptr, req_bytes.len);
+    if (reader == null) {
+        sendErrorMsg(handle, "invalid capnp message");
+        return false;
+    }
+    defer c.transport_req_reader_free(reader);
+
+    var shutdown = false;
+    const resp = dispatch(allocator, commands, reader, &shutdown) catch |err| blk: {
+        std.debug.print("storage dispatch error: {s}\n", .{@errorName(err)});
+        break :blk encodeError(@errorName(err));
+    };
+    defer if (resp.ptr) |p| c.transport_free_buf(p, resp.len);
+
+    if (resp.ptr) |p| {
+        try transport_socket.sendMessage(handle, p[0..resp.len]);
+    } else {
+        sendErrorMsg(handle, "internal storage error");
+    }
+    return shutdown;
 }
 
 // ── Store operation context (runs in per-type worker thread) ──────────────────
@@ -267,9 +185,24 @@ const StoreOp = struct {
         const self: *StoreOp = @ptrCast(@alignCast(ctx));
         stores_rwlock.lockShared();
         defer stores_rwlock.unlockShared();
+        const traced = traceStoreOp(self.cmd);
+        if (traced) {
+            if (self.commands.stores.getPtr(self.store_key)) |inst| {
+                std.debug.print("storage op begin cmd={s} store={s} path={s}/data\n", .{ storeCmdName(self.cmd), self.store_key, inst.store_dir });
+            } else {
+                std.debug.print("storage op begin cmd={s} store={s} path=<missing>\n", .{ storeCmdName(self.cmd), self.store_key });
+            }
+        }
         self.run() catch |e| {
+            if (traced) {
+                std.debug.print("storage op error cmd={s} store={s} err={s}\n", .{ storeCmdName(self.cmd), self.store_key, @errorName(e) });
+            }
             self.op_err = e;
+            return;
         };
+        if (traced) {
+            std.debug.print("storage op end cmd={s} store={s}\n", .{ storeCmdName(self.cmd), self.store_key });
+        }
     }
 
     fn run(self: *StoreOp) !void {
@@ -754,48 +687,10 @@ fn encodeManifest(tel: Telemetry, name: []const u8, store_type: u8, version: u32
     return .{ .ptr = p, .len = l };
 }
 
-fn sendErrorMsg(fd: std.posix.fd_t, msg: []const u8) void {
+fn sendErrorMsg(handle: i32, msg: []const u8) void {
     const resp = encodeError(msg);
     defer if (resp.ptr) |p| c.transport_free_buf(p, resp.len);
-    if (resp.ptr) |p| sendMessage(fd, p[0..resp.len]) catch {};
-}
-
-// ── Framing (mirrors transport/src/codec.zig) ─────────────────────────────────
-
-fn sendMessage(fd: std.posix.fd_t, data: []const u8) !void {
-    var len_buf: [4]u8 = undefined;
-    std.mem.writeInt(u32, &len_buf, @intCast(data.len), .little);
-    try writeAll(fd, &len_buf);
-    try writeAll(fd, data);
-}
-
-fn recvMessage(fd: std.posix.fd_t, allocator: Allocator) ![]u8 {
-    var len_buf: [4]u8 = undefined;
-    try readAll(fd, &len_buf);
-    const len = std.mem.readInt(u32, &len_buf, .little);
-    if (len > max_msg) return error.MessageTooLarge;
-    const buf = try allocator.alloc(u8, len);
-    errdefer allocator.free(buf);
-    try readAll(fd, buf);
-    return buf;
-}
-
-fn writeAll(fd: std.posix.fd_t, data: []const u8) !void {
-    var sent: usize = 0;
-    while (sent < data.len) {
-        const n = try posix_compat.write(fd, data[sent..]);
-        if (n == 0) return error.BrokenPipe;
-        sent += n;
-    }
-}
-
-fn readAll(fd: std.posix.fd_t, buf: []u8) !void {
-    var got: usize = 0;
-    while (got < buf.len) {
-        const n = try std.posix.read(fd, buf[got..]);
-        if (n == 0) return error.EndOfStream;
-        got += n;
-    }
+    if (resp.ptr) |p| transport_socket.sendMessage(handle, p[0..resp.len]) catch {};
 }
 
 // ── Signal / socket helpers ───────────────────────────────────────────────────

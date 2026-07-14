@@ -1,0 +1,10 @@
+.{
+    .name = .behemoth_storage,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xa763cced6bac3d06,
+    .dependencies = .{
+        .zimq = .{ .path = "../../wrapers/zimq" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "../transport", "../../wrapers" },
+}

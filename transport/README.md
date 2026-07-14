@@ -3,6 +3,18 @@
 ## Purpose
 Implements the native transport layer for communication with the storage/runtime components.
 
+## Wire transport
+The library uses the Zig `zimq` module for both supported endpoint kinds:
+
+- Unix paths become ZeroMQ `ipc://` endpoints.
+- Host/port targets become ZeroMQ `tcp://` endpoints.
+
+Each request or response remains the same flat Cap'n Proto byte buffer and is
+sent as one ZeroMQ message. The existing C ABI keeps its numeric connection
+handle so Bun consumers do not need changes; it is now an opaque ZMQ handle,
+not a POSIX file descriptor. `libzimq.so` is installed beside `libtransport.so`
+and is resolved through `$ORIGIN`.
+
 ## Responsibility Boundary
 Owns protocol-level message transport and service exposure; does not own storage internals or business-level API semantics.
 

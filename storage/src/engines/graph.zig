@@ -67,14 +67,27 @@ const default_lib_paths = [_][]const u8{
 };
 
 pub const GraphEngine = struct {
+    pub const Config = struct {
+        buffer_pool_bytes: ?u64 = null,
+        max_db_bytes: ?u64 = null,
+        max_threads: ?u64 = null,
+        auto_checkpoint: ?bool = null,
+        checkpoint_threshold_bytes: ?u64 = null,
+    };
+
     lib: ?std.DynLib,
     api: ?RyuApi,
     db: RyuDatabase,
     conn: RyuConnection,
     path: [:0]const u8,
     allocator: Allocator,
+    config: Config,
 
     pub fn init(allocator: Allocator, path: [:0]const u8) GraphEngine {
+        return initWithConfig(allocator, path, .{});
+    }
+
+    pub fn initWithConfig(allocator: Allocator, path: [:0]const u8, config: Config) GraphEngine {
         return .{
             .lib = null,
             .api = null,
@@ -82,6 +95,7 @@ pub const GraphEngine = struct {
             .conn = .{ ._connection = null },
             .path = path,
             .allocator = allocator,
+            .config = config,
         };
     }
 
@@ -101,6 +115,11 @@ pub const GraphEngine = struct {
 
         var config = api.default_system_config();
         config.read_only = false;
+        if (self.config.buffer_pool_bytes) |value| config.buffer_pool_size = value;
+        if (self.config.max_db_bytes) |value| config.max_db_size = value;
+        if (self.config.max_threads) |value| config.max_num_threads = value;
+        if (self.config.auto_checkpoint) |value| config.auto_checkpoint = value;
+        if (self.config.checkpoint_threshold_bytes) |value| config.checkpoint_threshold = value;
 
         var db = RyuDatabase{ ._database = null };
         if (api.database_init(self.path.ptr, config, &db) != .RyuSuccess) {

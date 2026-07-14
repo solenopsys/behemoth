@@ -10,8 +10,12 @@ pub const ColumnEngine = struct {
     sql: sql_engine.SqlEngine,
 
     pub fn init(allocator: Allocator, path: [:0]const u8) ColumnEngine {
+        return initWithConfig(allocator, path, .{});
+    }
+
+    pub fn initWithConfig(allocator: Allocator, path: [:0]const u8, config: sql_engine.SqlEngine.Config) ColumnEngine {
         return .{
-            .sql = sql_engine.SqlEngine.init(allocator, path),
+            .sql = sql_engine.SqlEngine.initWithConfig(allocator, path, config),
         };
     }
 

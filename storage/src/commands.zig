@@ -12,6 +12,7 @@ const ColumnEngine = @import("engines/column.zig").ColumnEngine;
 const VectorEngine = @import("engines/vector.zig").VectorEngine;
 const FilesEngine = @import("engines/files.zig").FilesEngine;
 const GraphEngine = @import("engines/graph.zig").GraphEngine;
+const management_mod = @import("management.zig");
 
 fn milliTimestamp() i64 {
     var ts: std.c.timespec = undefined;
@@ -151,13 +152,21 @@ pub const StorageCommands = struct {
     stores: std.StringHashMap(StoreInstance),
     data_dir: []const u8,
     allocator: Allocator,
+    management: ?*management_mod.Manager,
 
     pub fn init(allocator: Allocator, data_dir: []const u8) StorageCommands {
         return .{
             .stores = std.StringHashMap(StoreInstance).init(allocator),
             .data_dir = data_dir,
             .allocator = allocator,
+            .management = null,
         };
+    }
+
+    pub fn initWithManagement(allocator: Allocator, data_dir: []const u8, management: ?*management_mod.Manager) StorageCommands {
+        var commands = init(allocator, data_dir);
+        commands.management = management;
+        return commands;
     }
 
     pub fn deinit(self: *StorageCommands) void {
@@ -232,6 +241,10 @@ pub const StorageCommands = struct {
 
         var data_path_z: ?[:0]u8 = null;
         var handle: StoreHandle = undefined;
+        const engine_config = if (self.management) |management|
+            try management.configureStore(store_key, store_type)
+        else
+            management_mod.defaultConfig(store_type);
 
         switch (store_type) {
             .sql, .column, .vector => {
@@ -240,28 +253,28 @@ pub const StorageCommands = struct {
                 const path_z = try self.allocator.dupeZ(u8, path_tmp);
                 data_path_z = path_z;
                 switch (store_type) {
-                    .sql => handle = .{ .sql = SqlEngine.init(self.allocator, path_z) },
-                    .column => handle = .{ .column = ColumnEngine.init(self.allocator, path_z) },
-                    .vector => handle = .{ .vector = VectorEngine.init(self.allocator, path_z) },
+                    .sql => handle = .{ .sql = SqlEngine.initWithConfig(self.allocator, path_z, engine_config.sql) },
+                    .column => handle = .{ .column = ColumnEngine.initWithConfig(self.allocator, path_z, engine_config.column) },
+                    .vector => handle = .{ .vector = VectorEngine.initWithConfig(self.allocator, path_z, engine_config.vector) },
                     else => unreachable,
                 }
             },
             .kv => {
                 const path_z = try self.allocator.dupeZ(u8, data_dir);
                 data_path_z = path_z;
-                handle = .{ .kv = KvEngine.init(self.allocator, path_z) };
+                handle = .{ .kv = KvEngine.initWithConfig(self.allocator, path_z, engine_config.kv) };
             },
             .files => {
                 const path_z = try self.allocator.dupeZ(u8, data_dir);
                 data_path_z = path_z;
-                handle = .{ .files = FilesEngine.init(self.allocator, path_z) };
+                handle = .{ .files = FilesEngine.initWithConfig(self.allocator, path_z, engine_config.files) };
             },
             .graph => {
                 const path_tmp = try std.fmt.allocPrint(self.allocator, "{s}/graph.db", .{data_dir});
                 defer self.allocator.free(path_tmp);
                 const path_z = try self.allocator.dupeZ(u8, path_tmp);
                 data_path_z = path_z;
-                handle = .{ .graph = GraphEngine.init(self.allocator, path_z) };
+                handle = .{ .graph = GraphEngine.initWithConfig(self.allocator, path_z, engine_config.graph) };
             },
         }
 

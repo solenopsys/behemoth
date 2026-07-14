@@ -11,6 +11,7 @@ const StorageCommands = commands.StorageCommands;
 const ValkeyConfig = valkey_mod.Config;
 const with_transport = build_options.with_transport;
 const c = if (with_transport) @cImport(@cInclude("transport.h")) else struct {};
+const transport_socket = if (with_transport) @import("transport_zmq") else struct {};
 const server = if (with_transport) @import("server.zig") else struct {
     pub const BindConfig = union(enum) {
         unix: []const u8,
@@ -22,11 +23,12 @@ const server = if (with_transport) @import("server.zig") else struct {
 };
 const health_checker = if (with_transport) struct {
     fn run(allocator: std.mem.Allocator, bind_cfg: server.BindConfig, timeout_ms: u32) !bool {
-        const fd: std.posix.fd_t = switch (bind_cfg) {
-            .unix => |path| connectUnixSocket(path, timeout_ms) catch return false,
-            .tcp => |tcp| connectTcpSocket(tcp.host, tcp.port, timeout_ms) catch return false,
+        const handle: i32 = switch (bind_cfg) {
+            .unix => |path| connectUnix(path, allocator) catch return false,
+            .tcp => |tcp| connectTcp(tcp.host, tcp.port, allocator) catch return false,
         };
-        defer posix_compat.close(fd);
+        defer transport_socket.close(handle);
+        transport_socket.setOperationTimeout(handle, timeout_ms) catch return false;
 
         const req = c.transport_req_ping() orelse return false;
         defer c.transport_req_free(req);
@@ -36,9 +38,9 @@ const health_checker = if (with_transport) struct {
         if (c.transport_req_encode(req, @ptrCast(&out_buf), &out_len) != 0) return false;
         const raw = out_buf orelse return false;
         defer c.transport_free_buf(raw, out_len);
-        sendFramed(fd, raw[0..out_len]) catch return false;
+        transport_socket.sendMessage(handle, raw[0..out_len]) catch return false;
 
-        const resp_msg = recvFramed(fd, allocator) catch return false;
+        const resp_msg = transport_socket.recvMessage(handle, allocator) catch return false;
         defer allocator.free(resp_msg);
         const resp = c.transport_resp_decode(resp_msg.ptr, resp_msg.len) orelse return false;
         defer c.transport_resp_free(resp);
@@ -51,89 +53,16 @@ const health_checker = if (with_transport) struct {
     }
 };
 
-const max_probe_message_size: u32 = 64 * 1024 * 1024;
-
-fn setSocketTimeout(fd: std.posix.fd_t, timeout_ms: u32) !void {
-    var tv = std.posix.timeval{
-        .sec = @intCast(timeout_ms / 1000),
-        .usec = @intCast((timeout_ms % 1000) * 1000),
-    };
-    const opt = std.mem.asBytes(&tv);
-    try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, opt);
-    try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, opt);
+fn connectUnix(path: []const u8, allocator: std.mem.Allocator) !i32 {
+    const path_z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_z);
+    return transport_socket.connectUnix(path_z.ptr);
 }
 
-fn setTcpNoDelay(fd: std.posix.fd_t) !void {
-    const one: c_int = 1;
-    try std.posix.setsockopt(
-        fd,
-        std.posix.IPPROTO.TCP,
-        std.posix.TCP.NODELAY,
-        std.mem.asBytes(&one),
-    );
-}
-
-fn connectUnixSocket(path: []const u8, timeout_ms: u32) !std.posix.fd_t {
-    const fd = try posix_compat.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
-    errdefer posix_compat.close(fd);
-
-    var addr: std.posix.sockaddr.un = std.mem.zeroes(std.posix.sockaddr.un);
-    addr.family = std.posix.AF.UNIX;
-    if (path.len + 1 > addr.path.len) return error.SocketPathTooLong;
-    @memcpy(addr.path[0..path.len], path);
-    addr.path[path.len] = 0;
-
-    try posix_compat.connect(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un));
-    try setSocketTimeout(fd, timeout_ms);
-    return fd;
-}
-
-fn connectTcpSocket(host: []const u8, port: u16, timeout_ms: u32) !std.posix.fd_t {
-    const fd = try posix_compat.socket(std.posix.AF.INET, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
-    errdefer posix_compat.close(fd);
-
-    const ip4 = try posix_compat.parseIp4Address(host, port);
-    try posix_compat.connect(fd, @ptrCast(&ip4), @sizeOf(std.posix.sockaddr.in));
-    try setTcpNoDelay(fd);
-    try setSocketTimeout(fd, timeout_ms);
-    return fd;
-}
-
-fn sendFramed(fd: std.posix.fd_t, payload: []const u8) !void {
-    if (payload.len > max_probe_message_size) return error.MessageTooLarge;
-    var len_buf: [4]u8 = undefined;
-    std.mem.writeInt(u32, &len_buf, @intCast(payload.len), .little);
-    try writeAll(fd, &len_buf);
-    try writeAll(fd, payload);
-}
-
-fn recvFramed(fd: std.posix.fd_t, allocator: std.mem.Allocator) ![]u8 {
-    var len_buf: [4]u8 = undefined;
-    try readAll(fd, &len_buf);
-    const len = std.mem.readInt(u32, &len_buf, .little);
-    if (len > max_probe_message_size) return error.MessageTooLarge;
-    const payload = try allocator.alloc(u8, len);
-    errdefer allocator.free(payload);
-    try readAll(fd, payload);
-    return payload;
-}
-
-fn writeAll(fd: std.posix.fd_t, data: []const u8) !void {
-    var sent: usize = 0;
-    while (sent < data.len) {
-        const n = try posix_compat.write(fd, data[sent..]);
-        if (n == 0) return error.BrokenPipe;
-        sent += n;
-    }
-}
-
-fn readAll(fd: std.posix.fd_t, buf: []u8) !void {
-    var got: usize = 0;
-    while (got < buf.len) {
-        const n = try std.posix.read(fd, buf[got..]);
-        if (n == 0) return error.EndOfStream;
-        got += n;
-    }
+fn connectTcp(host: []const u8, port: u16, allocator: std.mem.Allocator) !i32 {
+    const host_z = try allocator.dupeZ(u8, host);
+    defer allocator.free(host_z);
+    return transport_socket.connectTcp(host_z.ptr, port);
 }
 
 comptime {

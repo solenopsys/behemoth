@@ -355,6 +355,17 @@ fn addStorageExecutable(
     }));
 
     if (with_transport) {
+        const zimq = b.dependency("zimq", .{ .target = target, .optimize = optimize });
+        const transport_zmq = b.createModule(.{
+            .root_source_file = b.path("../transport/src/socket.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        transport_zmq.addImport("zimq", zimq.module("zimq"));
+        exe.root_module.addImport("transport_zmq", transport_zmq);
+        exe.root_module.linkLibrary(zimq.artifact("zimq"));
+        exe.root_module.addRPathSpecial("$ORIGIN");
+
         const cpp_flags = &[_][]const u8{
             "-std=c++17",
             "-fPIC",
@@ -419,6 +430,10 @@ pub fn build(b: *Build) void {
     const with_transport = transport_override orelse supportsTransport(target);
     const exe = addStorageExecutable(b, target, optimize, "storage", with_transport, "libvalkey.so");
     b.installArtifact(exe);
+    if (with_transport) {
+        const zimq = b.dependency("zimq", .{ .target = target, .optimize = optimize });
+        b.installArtifact(zimq.artifact("zimq"));
+    }
 
     const mdbx = buildMdbx(b, target, optimize);
     const sqlite_vec = addSqliteVecObj(b, target, optimize);
@@ -470,6 +485,17 @@ pub fn build(b: *Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    const integration_target = b.resolveTargetQuery(build_utils.supported_targets[0]);
+    const integration_with_transport = transport_override orelse supportsTransport(integration_target);
+    const integration_exe = addStorageExecutable(b, integration_target, optimize, "storage-test-host", integration_with_transport, "libvalkey-test-host.so");
+    const install_integration_exe = b.addInstallArtifact(integration_exe, .{});
+
+    const run_integration_tests = b.addSystemCommand(&[_][]const u8{ "bun", "test", "tests" });
+    run_integration_tests.setCwd(b.path(".."));
+    run_integration_tests.step.dependOn(&install_integration_exe.step);
+    const integration_test_step = b.step("integration-test", "Run Bun integration/stress tests");
+    integration_test_step.dependOn(&run_integration_tests.step);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

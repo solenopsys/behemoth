@@ -8,15 +8,29 @@ const c = @cImport({
 });
 
 pub const SqlEngine = struct {
+    pub const TempStore = enum { memory, file };
+
+    pub const Config = struct {
+        cache_kib: u32 = 64 * 1024,
+        busy_timeout_ms: u32 = 10_000,
+        temp_store: TempStore = .memory,
+    };
+
     db: ?*c.sqlite3,
     path: [:0]const u8,
     allocator: Allocator,
+    config: Config,
 
     pub fn init(allocator: Allocator, path: [:0]const u8) SqlEngine {
+        return initWithConfig(allocator, path, .{});
+    }
+
+    pub fn initWithConfig(allocator: Allocator, path: [:0]const u8, config: Config) SqlEngine {
         return .{
             .db = null,
             .path = path,
             .allocator = allocator,
+            .config = config,
         };
     }
 
@@ -31,10 +45,21 @@ pub const SqlEngine = struct {
 
         // WAL mode + performance pragmas (matching Bun layer)
         try self.execPragma("PRAGMA journal_mode = WAL");
-        try self.execPragma("PRAGMA busy_timeout = 10000");
+        const busy_timeout_text = try std.fmt.allocPrint(self.allocator, "PRAGMA busy_timeout = {d}", .{self.config.busy_timeout_ms});
+        defer self.allocator.free(busy_timeout_text);
+        const busy_timeout = try self.allocator.dupeZ(u8, busy_timeout_text);
+        defer self.allocator.free(busy_timeout);
+        try self.execPragma(busy_timeout.ptr);
         try self.execPragma("PRAGMA synchronous = NORMAL");
-        try self.execPragma("PRAGMA cache_size = -64000");
-        try self.execPragma("PRAGMA temp_store = MEMORY");
+        const cache_size_text = try std.fmt.allocPrint(self.allocator, "PRAGMA cache_size = -{d}", .{self.config.cache_kib});
+        defer self.allocator.free(cache_size_text);
+        const cache_size = try self.allocator.dupeZ(u8, cache_size_text);
+        defer self.allocator.free(cache_size);
+        try self.execPragma(cache_size.ptr);
+        try self.execPragma(switch (self.config.temp_store) {
+            .memory => "PRAGMA temp_store = MEMORY",
+            .file => "PRAGMA temp_store = FILE",
+        });
     }
 
     pub fn close(self: *SqlEngine) void {
