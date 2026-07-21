@@ -61,7 +61,8 @@ Behemoth is designed for low-ops operation:
 - One runtime for multiple data models instead of operating many separate databases per feature.
 - Engine-per-workload approach: each store type uses a backend that is strong in that class.
 - Native-first implementation (Zig/C/C++) with low operational overhead.
-- Unified transport layer with Bun integration via `bun-transport`.
+- Shared transport layer from `navite/libs/transport` with Bun integration via
+  `navite/libs/cruller-transport` (`bun-transport`).
 - Microservice-first storage isolation: each service owns its own store boundary.
 - Tenant-first storage isolation: each business tenant can receive dedicated micro-stores.
 
@@ -69,12 +70,27 @@ Behemoth is designed for low-ops operation:
 
 Behemoth is designed as a microservice storage platform for SaaS environments:
 
-- Each business tenant gets isolated micro-storage units with minimal memory usage.
+- A `scope` is the primary storage-placement boundary. By default each
+  business scope has its own Behemoth instance and its own isolated
+  micro-storage units.
 - Each microservice keeps its own isolated storage boundary.
 - No cross-tenant data mixing by design at storage layout level.
 - No cross-service index coupling by design.
 
 This model improves security, tenancy isolation, and operational predictability for business cloud deployments.
+
+### Scaling one scope
+
+One scope is not permanently bound to one machine. When its workload grows,
+the stores of that scope may be split across several Behemoth instances and
+cluster nodes. This keeps the scope and its data ownership intact while
+isolating resource-heavy workloads from business-critical ones.
+
+For example, the stores for logs and telemetry of one customer can run on a
+separate Behemoth instance from the customer's transactional business
+stores. Fujin routes each logical storage address to the instance that owns
+it; clients keep using the logical address and do not need to know which
+node currently serves the store.
 
 ## Why Small Is Better Here
 
@@ -118,7 +134,7 @@ Provide a unified native data runtime for platform services that need different 
 
 ## Responsibility Boundary
 
-Behemoth owns native storage and transport foundations.
+Behemoth owns the native storage foundation and consumes the shared transport.
 It does not own product business workflows, UI logic, or domain orchestration policies.
 
 ## Storage Types
@@ -171,39 +187,47 @@ Benchmark numbers above come from publicly available engine documentation and be
 
 ## Transport Architecture
 
-Behemoth transport is optimized for very fast local/native communication:
+Behemoth no longer owns a dedicated storage transport. It is a regular peer
+of the cluster messaging system:
 
-- Unix domain sockets for low-overhead local IPC.
-- Cap'n Proto as the wire format and RPC layer.
-- Native transport implementation (`transport/`) with Bun integration (`bun-transport/`).
-
-This combination minimizes serialization and syscalls overhead compared to heavier network-first stacks.
-
-## Minimal Execution Example (bun-transport)
-
-```ts
-import { StorageConnection } from "bun-transport";
-
-const conn = new StorageConnection({
-  kind: "unix",
-  socketPath: "/run/behemoth.sock",
-});
-
-// 1) create/open isolated stores
-conn.open("ms-sales", "tenant-42-kv", "kv");
-conn.open("ms-sales", "tenant-42-sql", "sql");
-
-// 2) put/get in KV store
-conn.kvPut("ms-sales", "tenant-42-kv", "status", Buffer.from("active"));
-const status = conn.kvGet("ms-sales", "tenant-42-kv", "status");
-console.log(status?.toString("utf8")); // active
-
-// 3) SQL query in SQL store
-conn.execSql("ms-sales", "tenant-42-sql", "create table if not exists users(id integer primary key, name text)");
-conn.execSql("ms-sales", "tenant-42-sql", "insert into users(name) values ('Alice')");
-const rows = conn.querySql("ms-sales", "tenant-42-sql", "select id, name from users order by id desc limit 1");
-console.log(rows);
 ```
+storage client -> Fujin -> Behemoth -> storage engine
+```
+
+- Behemoth connects to Fujin through the universal `transport.Service`
+  connector, implemented with ZMQ `DEALER` on the peer side and Fujin's
+  single `ROUTER` on the broker side.
+- The cluster envelope is universal: it carries routing, correlation,
+  deadline, scope, user and codec metadata. Fujin routes it in exactly the
+  same way as a request for any other service.
+- Behemoth registers its blanket peer name `behemoth` and registers each
+  known store as `storage:<ms>/<store>`. A store created at runtime is
+  registered immediately.
+- A deployment normally creates one Behemoth instance per scope. A busy
+  scope may have several instances, each registering the stores it owns;
+  Fujin maps the logical storage address to the owning peer.
+- `navite/libs/transport` provides the native connector and envelope;
+  `navite/libs/cruller-transport` exposes the equivalent universal
+  messaging connector to Bun through `libmessage.so`.
+
+The only storage-specific protocol that remains is the **payload**. After
+Fujin has routed a request to Behemoth, Behemoth decodes the payload using
+the existing Cap'n Proto `wire` request/response schema. That schema
+describes storage operations such as open, SQL, KV, files and dumps; it is
+not a network transport and it does not choose a socket, endpoint or route.
+
+This separation is intentional:
+
+| Layer | Responsibility |
+| --- | --- |
+| Universal messaging envelope | Routing through Fujin, request correlation, scope/user context, errors and streaming. |
+| Behemoth Cap'n Proto `wire` payload | Storage command and storage result representation. |
+| Storage engine | Execution against SQL, KV, files, vector, graph or column data. |
+
+The legacy `StorageConnection` API in `cruller-transport` remains only as a
+compatibility adapter for callers that still speak the storage `wire`
+payload. New cross-process communication must use the universal messaging
+connector rather than a direct per-storage socket.
 
 ## Concurrency Model
 
@@ -227,9 +251,10 @@ This makes migration and dump management part of the engine workflow, not an ext
 
 ## Architecture
 
-- `storage/`: core storage runtime and multi-engine dispatch.
-- `transport/`: Cap'n Proto transport layer and wire protocol implementation.
-- `bun-transport/`: Bun bindings for integration with the native transport layer.
+- `src/`: core storage runtime and multi-engine dispatch.
+- `../../libs/transport/`: shared message envelope and ZeroMQ endpoints.
+- `../../libs/cruller-transport/`: Bun FFI bindings for universal messaging;
+  it also keeps a temporary compatibility client for the storage payload.
 
 ## Data Layout
 
@@ -247,19 +272,19 @@ This makes migration and dump management part of the engine workflow, not an ext
 ## Build (Storage)
 
 ```bash
-cd storage
+cd converged/navite/apps/behemoth
 zig build -Dall -Doptimize=ReleaseFast
 ```
 
 ## Build (Transport)
 
 ```bash
-cd transport
+cd converged/navite/libs/transport
 zig build -Dall -Doptimize=ReleaseFast
 ```
 
 ## Build (Container)
 
 ```bash
-podman build --layers -f storage/Containerfile -t behemoth .
+podman build --layers -f converged/navite/apps/behemoth/Containerfile -t behemoth .
 ```
