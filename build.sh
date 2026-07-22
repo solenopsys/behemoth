@@ -23,7 +23,7 @@ test -f "zig-out/lib/libvalkey-$ARTIFACT_TARGET.so" || {
     echo "missing zig-out/lib/libvalkey-$ARTIFACT_TARGET.so; build storage first" >&2
     exit 1
 }
-(cd "$CONVERGED_ROOT/native/wrapers/zimq" && zig build "-Dtarget=$TARGET" "-Doptimize=$OPTIMIZE")
+(cd "$CONVERGED_ROOT/navite/wrappers/protocols/zimq" && zig build "-Dtarget=$TARGET" "-Doptimize=$OPTIMIZE")
 
 mkdir -p .container-libs
-cp "$CONVERGED_ROOT/native/wrapers/zimq/zig-out/lib/libzimq-$ARTIFACT_TARGET.so" .container-libs/libzimq.so
+cp "$CONVERGED_ROOT/navite/wrappers/protocols/zimq/zig-out/lib/libzimq-$ARTIFACT_TARGET.so" .container-libs/libzimq.so

@@ -76,10 +76,11 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
 
     const endpoint = try endpointForConfig(allocator, cfg);
     defer allocator.free(endpoint);
+    const target = posix_compat.getenv("FUJIN_TARGET") orelse posix_compat.getenv("BEHEMOTH_FUJIN_TARGET") orelse "behemoth";
     var service = try transport.Service.init(allocator, .{
         .endpoint = endpoint,
-        .identity = "behemoth",
-        .target = "behemoth",
+        .identity = target,
+        .target = target,
         .shared = false,
         .services_json = "[{\"name\":\"storage\",\"methods\":[]}]",
         .limits = .{ .max_envelope_bytes = 64 * 1024, .max_payload_bytes = 16 * 1024 * 1024 },

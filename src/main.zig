@@ -28,6 +28,7 @@ const health_checker = if (with_transport) struct {
         defer allocator.free(endpoint);
         var identity_buffer: [64]u8 = undefined;
         const identity = try std.fmt.bufPrint(&identity_buffer, "behemoth-health-{d}", .{std.c.getpid()});
+        const target = posix_compat.getenv("FUJIN_TARGET") orelse posix_compat.getenv("BEHEMOTH_FUJIN_TARGET") orelse "behemoth";
         var service = try transport.Service.init(allocator, .{
             .endpoint = endpoint,
             .identity = identity,
@@ -51,7 +52,7 @@ const health_checker = if (with_transport) struct {
         try service.send(.{
             .kind = .request,
             .request_id = identity,
-            .to = .{ .target = "behemoth", .service = "storage" },
+            .to = .{ .target = target, .service = "storage" },
             .from = .{ .target = identity },
             .method = "ping",
             .codec = .capnp,
