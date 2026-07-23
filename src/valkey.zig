@@ -1,5 +1,4 @@
 const std = @import("std");
-const fs_compat = @import("fs_compat.zig");
 
 const c = @cImport({
     @cInclude("valkey_wrapper.h");
@@ -11,19 +10,13 @@ pub const Config = struct {
     port: u16 = 6379,
 };
 
-pub fn start(allocator: std.mem.Allocator, data_dir: []const u8, cfg: Config) !void {
+pub fn start(allocator: std.mem.Allocator, _: []const u8, cfg: Config) !void {
     if (!cfg.enabled) return;
-
-    const valkey_dir = try std.fmt.allocPrint(allocator, "{s}/valkey", .{data_dir});
-    defer allocator.free(valkey_dir);
-    try fs_compat.cwd().makePath(valkey_dir);
 
     const host_z = try allocator.dupeZ(u8, cfg.host);
     defer allocator.free(host_z);
-    const dir_z = try allocator.dupeZ(u8, valkey_dir);
-    defer allocator.free(dir_z);
 
-    if (c.valkey_wrapper_start(host_z.ptr, cfg.port, dir_z.ptr) != c.VALKEY_WRAPPER_OK) {
+    if (c.valkey_wrapper_start(host_z.ptr, cfg.port, null) != c.VALKEY_WRAPPER_OK) {
         std.debug.print("valkey start failed: {s}\n", .{std.mem.span(c.valkey_wrapper_last_error())});
         return error.ValkeyStartFailed;
     }

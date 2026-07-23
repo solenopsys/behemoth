@@ -88,6 +88,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
         .send_timeout_ms = 1000,
     });
     defer service.deinit();
+    std.debug.print("[fujin] service registered target={s} endpoint={s}\n", .{ target, endpoint });
 
     var management = try management_mod.initFromEnv(allocator);
     defer if (management) |*controller| controller.deinit();
