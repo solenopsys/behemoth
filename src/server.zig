@@ -1,5 +1,6 @@
 const std = @import("std");
 const fs_compat = @import("fs_compat.zig");
+const posix_compat = @import("posix_compat.zig");
 const sync_compat = @import("sync_compat.zig");
 const transport = @import("transport");
 const cmds = @import("commands.zig");
@@ -77,9 +78,8 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
     const endpoint = try endpointForConfig(allocator, cfg);
     defer allocator.free(endpoint);
     const target = posix_compat.getenv("FUJIN_TARGET") orelse posix_compat.getenv("BEHEMOTH_FUJIN_TARGET") orelse "behemoth";
-    var service = try transport.Service.init(allocator, .{
+    var runtime = try transport.Runtime.init(allocator, .{
         .endpoint = endpoint,
-        .identity = target,
         .target = target,
         .shared = false,
         .services_json = "[{\"name\":\"storage\",\"methods\":[]}]",
@@ -87,7 +87,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
         .recv_timeout_ms = 25,
         .send_timeout_ms = 1000,
     });
-    defer service.deinit();
+    defer runtime.deinit();
     std.debug.print("[fujin] service registered target={s} endpoint={s}\n", .{ target, endpoint });
 
     var management = try management_mod.initFromEnv(allocator);
@@ -98,7 +98,7 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
 
     var commands = StorageCommands.initWithManagement(allocator, data_dir, if (management) |*controller| controller else null);
     defer commands.deinit();
-    try autoOpenStores(allocator, &commands, &service, data_dir);
+    try autoOpenStores(allocator, &commands, &runtime, data_dir);
 
     pool = ThreadPool.init(allocator);
     try pool.start();
@@ -112,14 +112,15 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
         std.debug.print("storage valkey listening on tcp:{s}:{d}\n", .{ valkey_cfg.host, valkey_cfg.port });
     }
 
+    var handler_context = StorageHandler{ .commands = &commands, .runtime = &runtime };
+    try runtime.bind(target, handler_context.handler());
     while (true) {
         if (shutdown_requested.load(.seq_cst)) {
             std.debug.print("storage signal received, shutting down\n", .{});
             break;
         }
 
-        var handler_context = StorageHandler{ .commands = &commands, .service = &service };
-        _ = service.handleOne(handler_context.handler()) catch |err| {
+        _ = runtime.poll() catch |err| {
             std.debug.print("storage transport error: {s}\n", .{@errorName(err)});
             sync_compat.sleep(25 * std.time.ns_per_ms);
         };
@@ -128,29 +129,29 @@ pub fn start(allocator: Allocator, data_dir: []const u8, cfg: BindConfig, valkey
 
 const StorageHandler = struct {
     commands: *StorageCommands,
-    service: *transport.Service,
+    runtime: *transport.Runtime,
 
-    fn handler(self: *StorageHandler) transport.ServiceHandler {
+    fn handler(self: *StorageHandler) transport.RuntimeHandler {
         return .{ .context = self, .handle_fn = handleOpaque };
     }
 
-    fn handleOpaque(context: *anyopaque, allocator: Allocator, request: transport.ServiceRequest) !transport.ServiceResponse {
+    fn handleOpaque(context: *anyopaque, allocator: Allocator, request: transport.RuntimeRequest) !transport.RuntimeResponse {
         const self: *StorageHandler = @ptrCast(@alignCast(context));
-        return handleRequest(allocator, self.commands, self.service, request);
+        return handleRequest(allocator, self.commands, self.runtime, request);
     }
 };
 
 /// Best-effort: a fujin registration hiccup shouldn't fail the store
 /// operation that triggered it. Logged, not propagated.
-fn registerStoreService(allocator: Allocator, service: *transport.Service, ms: []const u8, store: []const u8) void {
+fn registerStoreService(allocator: Allocator, runtime: *transport.Runtime, ms: []const u8, store: []const u8) void {
     const name = std.fmt.allocPrint(allocator, "storage:{s}/{s}", .{ ms, store }) catch return;
     defer allocator.free(name);
-    service.registerService(name) catch |err| {
+    runtime.registerRoute(name) catch |err| {
         std.debug.print("storage registerService failed name={s}: {s}\n", .{ name, @errorName(err) });
     };
 }
 
-fn handleRequest(allocator: Allocator, commands: *StorageCommands, service: *transport.Service, request: transport.ServiceRequest) !transport.ServiceResponse {
+fn handleRequest(allocator: Allocator, commands: *StorageCommands, runtime: *transport.Runtime, request: transport.RuntimeRequest) !transport.RuntimeResponse {
     if (request.envelope.codec != .capnp) return error.CapnpPayloadRequired;
     const reader = c.transport_req_reader_decode(request.payload.ptr, request.payload.len);
     if (reader == null) {
@@ -161,7 +162,7 @@ fn handleRequest(allocator: Allocator, commands: *StorageCommands, service: *tra
     defer c.transport_req_reader_free(reader);
 
     var shutdown = false;
-    const resp = dispatch(allocator, commands, service, reader, &shutdown) catch |err| blk: {
+    const resp = dispatch(allocator, commands, runtime, reader, &shutdown) catch |err| blk: {
         std.debug.print("storage dispatch error: {s}\n", .{@errorName(err)});
         break :blk encodeError(@errorName(err));
     };
@@ -435,7 +436,7 @@ fn makeCacheKey(allocator: Allocator) ![]u8 {
 fn dispatch(
     allocator: Allocator,
     commands: *StorageCommands,
-    service: *transport.Service,
+    runtime: *transport.Runtime,
     reader: ?*c.TransportRequestReader,
     shutdown: *bool,
 ) !CBytes {
@@ -472,7 +473,7 @@ fn dispatch(
             // A store created at runtime is routable the same instant it
             // exists — fujin learns about it dynamically, not just at
             // startup autoload (see autoOpenStores).
-            registerStoreService(allocator, service, ms, store);
+            registerStoreService(allocator, runtime, ms, store);
             tel.op_count += 1;
             return encodeOk(tel);
         },
@@ -726,7 +727,7 @@ fn onSignal(_: std.posix.SIG) callconv(.c) void {
     shutdown_requested.store(true, .seq_cst);
 }
 
-fn autoOpenStores(allocator: Allocator, commands: *StorageCommands, service: *transport.Service, data_dir: []const u8) !void {
+fn autoOpenStores(allocator: Allocator, commands: *StorageCommands, runtime: *transport.Runtime, data_dir: []const u8) !void {
     var root = fs_compat.cwd().openDir(data_dir, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return,
         else => return err,
@@ -765,7 +766,7 @@ fn autoOpenStores(allocator: Allocator, commands: *StorageCommands, service: *tr
                 std.debug.print("storage autoload failed {s}/{s}: {s}\n", .{ ms_entry.name, store_entry.name, @errorName(err) });
                 continue;
             };
-            registerStoreService(allocator, service, ms_entry.name, store_entry.name);
+            registerStoreService(allocator, runtime, ms_entry.name, store_entry.name);
             opened += 1;
         }
     }

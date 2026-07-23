@@ -29,7 +29,10 @@ const health_checker = if (with_transport) struct {
         var identity_buffer: [64]u8 = undefined;
         const identity = try std.fmt.bufPrint(&identity_buffer, "behemoth-health-{d}", .{std.c.getpid()});
         const target = posix_compat.getenv("FUJIN_TARGET") orelse posix_compat.getenv("BEHEMOTH_FUJIN_TARGET") orelse "behemoth";
-        var service = try transport.Service.init(allocator, .{
+        // A self-contained NRPC client: its own DEALER socket and identity,
+        // registered with Fujin so the pong routes back. The ping is capnp, so
+        // send/recv are driven at the peer level rather than through call().
+        var client = try transport.Client.init(allocator, .{
             .endpoint = endpoint,
             .identity = identity,
             .target = identity,
@@ -39,7 +42,7 @@ const health_checker = if (with_transport) struct {
             .recv_timeout_ms = @intCast(timeout_ms),
             .send_timeout_ms = @intCast(timeout_ms),
         });
-        defer service.deinit();
+        defer client.deinit();
 
         const req = c.transport_req_ping() orelse return false;
         defer c.transport_req_free(req);
@@ -49,7 +52,7 @@ const health_checker = if (with_transport) struct {
         if (c.transport_req_encode(req, @ptrCast(&out_buf), &out_len) != 0) return false;
         const raw = out_buf orelse return false;
         defer c.transport_free_buf(raw, out_len);
-        try service.send(.{
+        const ping_env = transport.Envelope{
             .kind = .request,
             .request_id = identity,
             .to = .{ .target = target, .service = "storage" },
@@ -57,9 +60,12 @@ const health_checker = if (with_transport) struct {
             .method = "ping",
             .codec = .capnp,
             .deadline_ms = timeout_ms,
-        }, raw[0..out_len]);
+        };
+        const ping_bytes = try transport.envelope.encodeAlloc(allocator, &ping_env);
+        defer allocator.free(ping_bytes);
+        try client.peer.send(ping_bytes, raw[0..out_len]);
 
-        var incoming = (try service.peer.recv()) orelse return false;
+        var incoming = (try client.peer.recv()) orelse return false;
         defer incoming.deinit();
         const response_env = try incoming.parseEnvelope();
         if (response_env.kind != .response or !std.mem.eql(u8, response_env.request_id, identity)) return false;
